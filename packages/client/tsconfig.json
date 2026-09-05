@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "rootDir": "src",
+    "outDir": "dist-types",
+    // Vite produces the shippable JS; tsc here exists purely to typecheck and
+    // to satisfy project references, so emitting JS as well is wasted work.
+    "emitDeclarationOnly": true,
+    "paths": {
+      "@rts/sim": ["../sim/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "references": [{ "path": "../sim" }]
+}

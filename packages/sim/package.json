@@ -1,0 +1,13 @@
+{
+  "name": "@rts/sim",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "comment": "ZERO runtime dependencies, by design. This package must run bit-identically in the browser and in Node. Adding a dependency here risks the determinism guarantee.",
+  "dependencies": {}
+}

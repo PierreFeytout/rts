@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RTS — M1</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0b0f16;
+      }
+      #viewport {
+        display: block;
+        width: 100%;
+        height: 100%;
+        /* The camera is driven by our own handlers; browser touch gestures
+           would fight them. */
+        touch-action: none;
+      }
+      #hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        padding: 10px 14px;
+        border: 1px solid #234;
+        border-radius: 6px;
+        background: rgba(8, 12, 20, 0.72);
+        color: #8fe3ff;
+        font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        white-space: pre;
+        pointer-events: none;
+        backdrop-filter: blur(4px);
+      }
+      #help {
+        position: fixed;
+        bottom: 12px;
+        left: 12px;
+        color: #5f7896;
+        font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="viewport"></canvas>
+    <div id="hud"></div>
+    <div id="help">
+      left click / drag — select (shift to add) · right click — move order · WASD — pan · middle drag
+      — pan · wheel — zoom
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

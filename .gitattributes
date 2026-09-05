@@ -1,0 +1,21 @@
+# Normalise line endings in the repository to LF.
+#
+# This matters more than usual here: from M2 onward the repo carries golden
+# replay files whose hashes must match byte-for-byte on every machine. A
+# checkout that rewrote LF to CRLF would change those bytes and fail the
+# determinism tests for reasons that look nothing like the actual cause.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.glb binary
+*.gltf binary
+*.ktx2 binary
+*.ogg binary
+*.mp3 binary
+*.wav binary
+
+# Replay and golden-hash fixtures: bytes are the contract.
+*.replay binary
+*.golden binary

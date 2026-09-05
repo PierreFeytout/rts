@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No "dom", no @types/node. The simulation must not be able to reach a
+    // platform API even by accident -- that is what keeps it deterministic
+    // and runnable identically on host, guest and any future headless arbiter.
+    "lib": ["ES2022"],
+    "types": [],
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}
