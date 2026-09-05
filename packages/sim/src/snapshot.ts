@@ -22,7 +22,7 @@ import type { World } from "./world.js";
  */
 
 /** Bumped whenever the layout below changes, so a mismatch fails loudly. */
-export const SNAPSHOT_VERSION = 2;
+export const SNAPSHOT_VERSION = 3;
 
 const MAGIC = 0x52545331; // "RTS1"
 
@@ -177,6 +177,11 @@ export function decodeSnapshot(world: World, data: Uint8Array): void {
   for (const array of world.players.flagArrays()) read(array, MAX_PLAYERS);
 
   world.grid.tiles.set(new Uint8Array(aligned.buffer, aligned.byteOffset + offset, gridBytes));
+
+  // Fog is NOT restored. `visible` is recomputed on the next step, and
+  // `explored` is this peer's own map memory -- overwriting it with the host's
+  // would show a player ground they never scouted. See vision.ts.
+  world.vision.visible.fill(0);
 
   world.tick = header[2];
   world.rng.state = header[3];

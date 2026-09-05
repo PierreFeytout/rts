@@ -3,8 +3,8 @@
 A futuristic real-time strategy game. 2.5D isometric, peer-hosted multiplayer —
 the player who creates the game hosts it, with no dedicated server to deploy.
 
-**Status: M5 complete — two playable races, and the second one cost no engine
-code.** Gather alloy, tap geothermal vents for plasma, build a base, train an
+**Status: M6 complete — fog of war, a minimap, control groups, and units that
+look like units.** Gather alloy, tap geothermal vents for plasma, build a base, train an
 army, and destroy your opponent. Peer-hosted: one player creates the game, gets
 a six-character code, and everyone else joins over a direct WebRTC connection
 with no dedicated server anywhere.
@@ -45,7 +45,7 @@ npm run dev                       # client on :5173, finds the broker automatica
 ```
 
 ```bash
-npm test           # 280 tests
+npm test           # 295 tests
 npm run typecheck
 npm run lint       # includes the determinism rules
 ```
@@ -57,6 +57,9 @@ npm run lint       # includes the determinism rules
 | left click / drag | select (shift to add) |
 | right click | contextual order — move, attack, gather, or set a rally point |
 | `A` then click | attack-move: advance, engaging anything hostile on the way |
+| `Ctrl+1`..`9` | assign a control group |
+| `1`..`9` | recall a group; press twice to centre the camera on it |
+| click/drag minimap | jump the camera |
 | `S` / `H` | stop / hold position |
 | `Esc` | cancel a pending build placement |
 | `WASD`, arrows, middle-drag | pan |
@@ -81,11 +84,12 @@ mandatory.
 
 Inside `packages/sim`: `fixed` (Q16.16 math), `rng`, `clock` (tick pacing),
 `hash` (state hashing), `entities` (SoA store), `grid` (passability),
-`flowfield` (Dijkstra pathing), `spatial` (neighbour queries), `commands`,
-`types` (the *shape* of content, and the damage matrix), `players` (resources,
-supply, defeat), `combat`, `economy`, `production`, `events` (derived output for
-the renderer), `snapshot` (serialisation), `fixture-types` and `scenario` (the
-determinism fixture), and `world` (`step()` is the only mutator).
+`flowfield` (Dijkstra pathing), `spatial` (neighbour queries), `vision` (fog of
+war), `commands`, `types` (the *shape* of content, and the damage matrix),
+`players` (resources, supply, defeat), `combat`, `economy`, `production`,
+`events` (derived output for the renderer), `snapshot` (serialisation),
+`fixture-types` and `scenario` (the determinism fixture), and `world` (`step()`
+is the only mutator).
 
 Three packages deliberately avoid both DOM and Node types. That is what lets the
 identical arbiter run in the host's browser tab today and in a headless
@@ -323,6 +327,56 @@ classic stalemate where a defeated player's last drone hides in a corner
 forever. The last player standing wins; a mutual kill stays undecided rather
 than crowning whoever died last.
 
+## Fog of war
+
+Fog is **simulation state, not a rendering filter**: a unit cannot acquire a
+target it cannot see, so scouting is a real decision. That means every peer has
+to agree on exactly who can see what, on every tick.
+
+Two grids per player, and the distinction between them is the interesting part:
+
+- **`visible`** is recomputed from scratch every tick and is what the simulation
+  reads. Wholesale rather than incrementally — an incremental scheme has to
+  subtract a unit's old circle before adding its new one, and getting that wrong
+  leaves permanent phantom vision that nothing ever clears. A memset plus a few
+  hundred stamped circles costs **0.21 ms per tick at 400 units**.
+- **`explored`** only ever gains bits, and *nothing in the simulation reads it*.
+  It exists so the renderer can draw terrain you have seen before. That makes it
+  presentation state: not hashed, not snapshotted, and peers are **expected** to
+  differ on it. A peer that resyncs keeps its own map memory, which is exactly
+  right — being handed the host's would show a player ground they never scouted.
+  Shipping it would also have cost 256 kB per resync on a 256-tile map, five
+  times the rest of the snapshot combined, to transmit something the receiver
+  has a better version of.
+
+Neither grid is hashed. `visible` is a pure function of entity positions, which
+are hashed already, so including it would cost a quarter-megabyte of hashing per
+desync check to detect nothing new.
+
+What the player sees follows from what fog *means*:
+
+| | in sight | explored | never seen |
+|---|---|---|---|
+| your own things | drawn | drawn | drawn |
+| enemy units | drawn | hidden | hidden |
+| enemy buildings, ore | drawn | dimmed | hidden |
+
+Enemy units vanish because a unit is where it is *right now* — drawing a
+remembered one would be a lie. Buildings and ore do not move, so remembering
+them is what a player expects. The same rule governs what can be clicked, so
+nothing is ever visible-but-unclickable or clickable-but-invisible.
+
+Auto-acquisition is gated by sight; an explicit attack order is not. The player
+saw the target when they issued it, and having units abandon a chase the moment
+it entered fog would be maddening. Return fire is gated too — being shot out of
+the dark must not hand out free vision.
+
+Content may set `visionRange`, and the loader derives one otherwise. It always
+exceeds weapon range, and the loader **refuses** content where it does not: a
+unit that can shoot further than it can see is blind inside its own firing
+envelope and never engages, which reads as a broken weapon rather than as a
+content mistake.
+
 ## Adding a race
 
 The extensibility requirement was never "make it possible" — everything is
@@ -534,6 +588,39 @@ Learned while building this, recorded so they are not re-learned:
 - **Coherence checks belong at load, not at first use.** A race with no drop-off
   loads perfectly and then mines alloy it can never bank: the workers walk home
   forever and the player watches an economy that produces nothing.
+- **A `DataTexture` has no colour space, so three.js reads its bytes as
+  linear.** Write the sRGB bytes of a near-black tone into one and it renders
+  about four times brighter than intended — which for this palette landed almost
+  exactly on the unlit ground colour. The fog was drawing perfectly and was
+  invisible. Material colours go through the sRGB conversion properly, so the
+  texture now carries alpha only and the tone lives on the material.
+- **`flipY` has no effect on a `DataTexture` either**, because the data is
+  uploaded straight from a typed array rather than decoded from an image. Row 0
+  lands at the far edge of the plane, mirroring the fog north to south. It looks
+  convincing right up until you notice the lit patch is over the enemy's base
+  rather than your own.
+- **`mergeGeometries` needs every input indexed, or none of them.** three.js
+  primitives disagree: Box, Cylinder, Cone and Sphere are indexed, the polyhedra
+  are not. Mixing one decorative shard into a model built from boxes throws
+  during scene construction, so the whole game fails to start. Normalising
+  inside the merge helper keeps it total.
+- **Scene fog fights fog of war.** Distance fog blends everything toward the
+  horizon tone, so nothing can be genuinely dark — unexplored map lifts to a
+  visible grey the further from the camera it sits. The fog overlay and the
+  terrain blocks opt out of it.
+- **Silhouettes are picked from what a unit does, not what it is called.** A
+  harvester gets the harvester shape because it has the `gather` behaviour, a
+  brawler because its weapon is short-ranged. A race added tomorrow gets
+  readable models with no art and no code — the same principle as the rest of
+  the content system, applied to the one part that would otherwise need a
+  hand-written table per race.
+- **Two units with the same silhouette is a real bug, not a cosmetic one.** The
+  Vanguard's Trooper and Scout both classified as "ranged" and were
+  indistinguishable on the field, which matters for two units with different
+  jobs. Fast movers now get their own shape.
+- **The HUD must not hash the world every frame.** `world.hash()` walks every
+  entity, every player and the full cost grid. That is cheap at 20 Hz and
+  wasteful at 240; the debug readout refreshes a few times a second instead.
 
 ## Debug tooling
 
@@ -544,6 +631,8 @@ __rts.step(n)            // advance n ticks through the arbiter
 __rts.renderFrame()      // render once, without waiting for rAF
 __rts.capture('name')    // save a PNG to .captures/ via the dev server
 __rts.determinism()      // run the cross-runtime fixture, print its hash trace
+__rts.reveal(true)       // lift the fog, for watching what an opponent is doing
+__rts.scene              // the three.js scene: inspecting materials beats guessing
 __rts.session            // the HostSession: .log, .tick, .inputDelay, .desyncs
 ```
 
@@ -559,5 +648,5 @@ tooling captures nothing there, while a WebGL readback still works.
 - **M3** — WebRTC + lobby: signaling broker, join codes, connection diagnostics ✅
 - **M4** — Gameplay: harvesting, construction, production, combat, victory ✅
 - **M5** — Content system: zod-validated race definitions, behaviour registry, race #2 ✅
-- **M6** — Presentation: fog of war, minimap, control groups, command UI, art pass
+- **M6** — Presentation: fog of war, minimap, control groups, command UI, art pass ✅
 - **M7** — Ship: broker deployment, reconnect, replay playback

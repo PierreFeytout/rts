@@ -71,6 +71,14 @@ const common = {
   armour,
   /** Collision radius in tiles. */
   radius: tiles,
+  /**
+   * Sight radius in whole tiles. Omit to let the loader derive one.
+   *
+   * The derived value is always larger than weapon range, because a unit that
+   * cannot see as far as it can shoot never engages -- it stands inside its own
+   * firing envelope waiting for a target it is structurally unable to acquire.
+   */
+  visionRange: z.number().int().min(1).max(40).optional(),
   costAlloy: count.default(0),
   costPlasma: count.default(0),
   /** Seconds to train or construct. */

@@ -267,6 +267,10 @@ export class Selection {
 
     for (let i = 0; i < e.highWater; i++) {
       if (e.alive[i] !== 1) continue;
+      // Nothing hidden by fog is clickable. Otherwise a player could
+      // right-click a patch of darkness and happen to order an attack on
+      // something they have no way of knowing is there.
+      if (!this.isPickable(i)) continue;
       const type = this.world.types.get(e.typeId[i]);
       const reach = type.footprint > 0 ? type.footprint * 0.6 : CLICK_PICK_RADIUS;
       const dx = simToWorld(e.posX[i]) - point.x;
@@ -282,6 +286,26 @@ export class Selection {
       }
     }
     return best;
+  }
+
+  /**
+   * Whether the local player is allowed to click this entity.
+   *
+   * Matches what the renderer draws: own things always, moving things only
+   * while visible, static things once explored. Any mismatch would leave
+   * something on screen that cannot be clicked, or clickable and invisible.
+   */
+  private isPickable(index: number): boolean {
+    const e = this.world.entities;
+    const vision = this.world.vision;
+    if (!vision.enabled) return true;
+    if (e.owner[index] === this.localPlayer) return true;
+
+    const tx = e.posX[index] >> 16;
+    const ty = e.posY[index] >> 16;
+    if (vision.isVisible(this.localPlayer, tx, ty)) return true;
+    const isStatic = this.world.types.get(e.typeId[index]).footprint > 0;
+    return isStatic && vision.isExplored(this.localPlayer, tx, ty);
   }
 
   private selectAt(clientX: number, clientY: number): void {

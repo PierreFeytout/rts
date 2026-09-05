@@ -170,6 +170,11 @@ function acquire(world: World, i: number, range: Fx): number {
     const j = candidates[k];
     if (j === i || store.alive[j] !== 1) continue;
     if (!isHostile(owner[i], owner[j])) continue;
+    // Fog gates acquisition, which is what makes scouting matter. An explicit
+    // attack order is NOT gated -- the player saw the target when they issued
+    // it, and having units abandon a chase the moment it entered fog would be
+    // maddening.
+    if (!world.vision.canSee(owner[i], store, j)) continue;
 
     const targetType = types.get(typeId[j]);
     // Ore patches and vents are terrain with hit points, not enemies.
@@ -239,7 +244,10 @@ function fire(world: World, i: number, ti: number, baseDamage: number, damageTyp
     remaining > 0 &&
     store.targetId[ti] === NULL_ENTITY &&
     store.orderKind[ti] === ORDER_NONE &&
-    types.can(store.typeId[ti], CAN_ATTACK)
+    types.can(store.typeId[ti], CAN_ATTACK) &&
+    // Only if it can actually see who shot it. Return fire from an unseen
+    // attacker would quietly hand out free vision.
+    world.vision.canSee(store.owner[ti], store, i)
   ) {
     store.targetId[ti] = store.idAt(i);
   }

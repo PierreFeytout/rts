@@ -132,6 +132,15 @@ export interface EntityType {
   readonly range: Fx;
   /** Ticks between shots. */
   readonly cooldown: number;
+  /**
+   * Sight radius in whole tiles.
+   *
+   * Tiles rather than fixed-point because vision stamps a grid, and a
+   * sub-tile radius would be a precision nobody can act on. Must exceed
+   * weapon range for anything that shoots, or the unit is blind inside its
+   * own firing envelope and simply never engages.
+   */
+  readonly visionRange: number;
 
   readonly costAlloy: number;
   readonly costPlasma: number;

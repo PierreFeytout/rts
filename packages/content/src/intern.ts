@@ -92,6 +92,11 @@ export interface ContentSet {
   race(raceId: string): RaceInfo;
 }
 
+/** A Q16.16 distance rounded up to whole tiles, for comparing against vision. */
+function worldToTileCeil(fx: number): number {
+  return Math.ceil(fx / 65536);
+}
+
 /** Seconds to whole ticks, never rounding a real duration down to nothing. */
 function ticks(seconds: number): number {
   const t = Math.round(seconds * TICKS_PER_SECOND);
@@ -101,6 +106,20 @@ function ticks(seconds: number): number {
 /** Tiles per second to Q16.16 per tick. */
 function speed(tilesPerSecond: number): number {
   return fxFromFloat(tilesPerSecond / TICKS_PER_SECOND);
+}
+
+/**
+ * Sight radius, defaulting to comfortably past weapon range.
+ *
+ * A unit whose vision is shorter than its range is blind inside its own firing
+ * envelope: it never auto-acquires, so it reads as a broken weapon rather than
+ * as a content mistake. The floor of 6 gives even unarmed workers enough sight
+ * to be worth scouting with.
+ */
+function vision(explicit: number | undefined, rangeTiles: number): number {
+  if (explicit !== undefined) return explicit;
+  const derived = Math.ceil(rangeTiles) + 3;
+  return derived < 6 ? 6 : derived;
 }
 
 /** Full turns per second to BAM per tick. */
@@ -217,6 +236,7 @@ function buildUnit(unit: RawUnit, idOf: IdLookup): EntityType {
     damageType: unit.weapon ? DAMAGE[unit.weapon.damageType] : DAMAGE_KINETIC,
     range: fxFromFloat(unit.weapon?.range ?? 0),
     cooldown: unit.weapon ? ticks(unit.weapon.cooldown) : 20,
+    visionRange: vision(unit.visionRange, unit.weapon?.range ?? 0),
     costAlloy: unit.costAlloy,
     costPlasma: unit.costPlasma,
     buildTime: ticks(unit.buildTime),
@@ -248,6 +268,7 @@ function buildBuilding(building: RawBuilding, idOf: IdLookup): EntityType {
     damageType: building.weapon ? DAMAGE[building.weapon.damageType] : DAMAGE_KINETIC,
     range: fxFromFloat(building.weapon?.range ?? 0),
     cooldown: building.weapon ? ticks(building.weapon.cooldown) : 20,
+    visionRange: vision(building.visionRange, building.weapon?.range ?? 0),
     costAlloy: building.costAlloy,
     costPlasma: building.costPlasma,
     buildTime: ticks(building.buildTime),
@@ -278,6 +299,9 @@ function buildResource(resource: RawResource, idOf: IdLookup): EntityType {
     damageType: DAMAGE_KINETIC,
     range: 0,
     cooldown: 0,
+    // Scenery grants no sight. An ore patch that lit up the map around itself
+    // would hand every player free vision of every expansion.
+    visionRange: 0,
     costAlloy: 0,
     costPlasma: 0,
     buildTime: 1,
@@ -318,6 +342,12 @@ function checkRace(race: RawRace, table: TypeTable, idOf: IdLookup): RaceInfo {
       // A weapon with no behaviour to fire it is a unit that stands there being
       // shot, which reads as a combat bug rather than a content mistake.
       throw new Error(`content: ${unit.id} defines a weapon but lacks the 'attack' behaviour`);
+    }
+    if (type.visionRange <= worldToTileCeil(type.range)) {
+      throw new Error(
+        `content: ${unit.id} can shoot further than it can see ` +
+          `(range ${worldToTileCeil(type.range)}, vision ${type.visionRange})`,
+      );
     }
     if ((type.abilities & CAN_GATHER) !== 0 && (type.cargoCapacity === 0 || type.gatherTime === 0)) {
       throw new Error(`content: ${unit.id} can gather but has no cargoCapacity or gatherTime`);
@@ -427,6 +457,7 @@ function hashContent(
     h = hashNumber(h, type.damageType);
     h = hashNumber(h, type.range);
     h = hashNumber(h, type.cooldown);
+    h = hashNumber(h, type.visionRange);
     h = hashNumber(h, type.costAlloy);
     h = hashNumber(h, type.costPlasma);
     h = hashNumber(h, type.buildTime);

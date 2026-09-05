@@ -1,4 +1,4 @@
-import { TILE_BLOCKED, type CostGrid } from "@rts/sim";
+import { TILE_BLOCKED, VIS_HIDDEN, VIS_VISIBLE, type CostGrid, type World } from "@rts/sim";
 import * as THREE from "three";
 
 /**
@@ -16,11 +16,19 @@ import * as THREE from "three";
  *
  * One instance per blocked tile. At a few hundred tiles that is a single draw
  * call and not worth the complexity of merging runs into larger boxes.
+ *
+ * Fog is applied as a per-instance colour rather than by the fog overlay quad,
+ * because these blocks stand well above it -- an overlay lying on the ground
+ * would leave every cliff brightly lit inside an unexplored region.
  */
 export class TerrainRenderer {
   private readonly scene: THREE.Scene;
   private mesh: THREE.InstancedMesh | null = null;
   private builtVersion = -1;
+  /** Tile coordinate of each instance, so fog can be looked up per frame. */
+  private tiles = new Int32Array(0);
+  private fogTick = -1;
+  private readonly colour = new THREE.Color();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -41,10 +49,14 @@ export class TerrainRenderer {
 
     const mesh = new THREE.InstancedMesh(
       new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshStandardMaterial({ color: 0x2c3a4f, roughness: 0.85 }),
+      // White, because the real colour arrives per instance -- a tinted base
+      // would multiply with the fog shade and wash out.
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, fog: false }),
       blocked.length,
     );
 
+    this.tiles = new Int32Array(blocked.length * 2);
+    this.fogTick = -1;
     const scratch = new THREE.Object3D();
     for (let n = 0; n < blocked.length; n++) {
       const cell = blocked[n];
@@ -58,12 +70,38 @@ export class TerrainRenderer {
       scratch.scale.set(1, height, 1);
       scratch.updateMatrix();
       mesh.setMatrixAt(n, scratch.matrix);
+      this.tiles[n * 2] = tx;
+      this.tiles[n * 2 + 1] = ty;
     }
     mesh.instanceMatrix.needsUpdate = true;
     mesh.frustumCulled = false;
 
     this.mesh = mesh;
     this.scene.add(mesh);
+  }
+
+  /**
+   * Shade each block by what the local player can see of its tile.
+   *
+   * Only when the simulation has advanced: fog changes on tick boundaries, and
+   * rewriting a few hundred instance colours at display rate would be work
+   * nobody could perceive.
+   */
+  applyFog(world: World, localPlayer: number): void {
+    const mesh = this.mesh;
+    if (!mesh) return;
+    if (world.tick === this.fogTick) return;
+    this.fogTick = world.tick;
+
+    for (let n = 0; n < mesh.count; n++) {
+      const level = world.vision.enabled
+        ? world.vision.levelAt(localPlayer, this.tiles[n * 2], this.tiles[n * 2 + 1])
+        : VIS_VISIBLE;
+      const shade = level === VIS_VISIBLE ? 1 : level === VIS_HIDDEN ? 0.06 : 0.42;
+      this.colour.setHex(0x2c3a4f).multiplyScalar(shade);
+      mesh.setColorAt(n, this.colour);
+    }
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
   dispose(): void {

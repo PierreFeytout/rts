@@ -2,9 +2,12 @@ import type { GuestSession, HostSession } from "@rts/netcode";
 import { TICK_HZ, TICK_MS, hashToString, type Command, type World } from "@rts/sim";
 import * as THREE from "three";
 import { CameraControls } from "./camera-controls.js";
+import { ControlGroups } from "./control-groups.js";
 import { Effects } from "./effects.js";
+import { FogRenderer } from "./fog-renderer.js";
 import { Hud } from "./hud.js";
 import { CAMERA_DISTANCE, IsoCamera } from "./iso-camera.js";
+import { Minimap } from "./minimap.js";
 import { Selection } from "./selection.js";
 import { TerrainRenderer } from "./terrain-renderer.js";
 import { WorldRenderer } from "./world-renderer.js";
@@ -41,6 +44,10 @@ export interface RunningGame {
   session: HostSession | GuestSession;
   rig: IsoCamera;
   selection: Selection;
+  /** Exposed for the dev console: inspecting materials beats guessing. */
+  scene: THREE.Scene;
+  /** Reveal the whole map. Debugging aid; see VisionGrid.enabled. */
+  revealMap: (on: boolean) => void;
   renderFrame: () => void;
   capture: (name?: string, width?: number) => Promise<unknown>;
   stop: () => void;
@@ -90,12 +97,15 @@ export function startGame(options: GameOptions): RunningGame {
   const terrain = new TerrainRenderer(scene);
   const units = new WorldRenderer(scene, rig.camera);
   const effects = new Effects(scene);
+  const fog = new FogRenderer(scene, mapTiles, localPlayer);
   const selection = new Selection(world, rig, canvas, localPlayer, (command: Command) =>
     session.submitLocal(command),
   );
   const hud = new Hud(world, localPlayer, selection, (command: Command) =>
     session.submitLocal(command),
   );
+  const groups = new ControlGroups(world, selection, rig, localPlayer);
+  const minimap = new Minimap(world, rig, localPlayer);
 
   // Translucent footprint preview shown while placing a building.
   const ghost = new THREE.Mesh(
@@ -128,6 +138,8 @@ export function startGame(options: GameOptions): RunningGame {
   let fps = 0;
   let lastStepMs = 0;
   let running = true;
+  let cachedHash = "";
+  let lastHashMs = 0;
 
   function resize(): void {
     const w = canvas.clientWidth || window.innerWidth;
@@ -192,10 +204,13 @@ export function startGame(options: GameOptions): RunningGame {
 
   function renderFrame(deltaSeconds = 0): void {
     terrain.sync(world.grid);
-    units.update(world, session.alpha, selection.selected);
+    terrain.applyFog(world, localPlayer);
+    fog.update(world);
+    units.update(world, session.alpha, selection.selected, localPlayer);
     effects.update(deltaSeconds);
     updateGhost();
     hud.update();
+    minimap.draw(performance.now());
     renderer.render(scene, rig.camera);
 
     const peers = isHost
@@ -204,8 +219,15 @@ export function startGame(options: GameOptions): RunningGame {
         ? 1
         : 0;
 
-    // Hashing walks the whole world; once per frame, reused for both consumers.
-    const hash = hashToString(world.hash());
+    // Hashing walks the whole world -- entities, players, and the full cost
+    // grid. That is cheap at 20 Hz and wasteful at 240, so the HUD's copy is
+    // refreshed a few times a second rather than every frame.
+    const now = performance.now();
+    if (now - lastHashMs > 400) {
+      lastHashMs = now;
+      cachedHash = hashToString(world.hash());
+    }
+    const hash = cachedHash;
 
     debug.textContent =
       `${fps} fps   tick ${world.tick} @ ${TICK_HZ}Hz   step ${lastStepMs.toFixed(2)}ms` +
@@ -261,14 +283,23 @@ export function startGame(options: GameOptions): RunningGame {
     session,
     rig,
     selection,
+    scene,
     renderFrame,
     capture,
+    revealMap(on: boolean) {
+      // Flipping this on one peer only would desync a match, since fog gates
+      // target acquisition. It is for looking at a solo game.
+      world.vision.enabled = !on;
+    },
     stop() {
       running = false;
       clearInterval(pumpTimer);
       controls.dispose();
       selection.dispose();
       hud.dispose();
+      groups.dispose();
+      minimap.dispose();
+      fog.dispose();
       window.removeEventListener("resize", resize);
     },
   };

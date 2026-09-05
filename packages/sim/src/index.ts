@@ -16,4 +16,5 @@ export * from "./scenario.js";
 export * from "./snapshot.js";
 export * from "./spatial.js";
 export * from "./types.js";
+export * from "./vision.js";
 export * from "./world.js";

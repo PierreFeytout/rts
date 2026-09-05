@@ -57,6 +57,7 @@ import { PlayerState } from "./players.js";
 import { recomputeSupplyAndDefeat, runConstruction, runProduction } from "./production.js";
 import { Rng } from "./rng.js";
 import { SpatialHash } from "./spatial.js";
+import { VisionGrid } from "./vision.js";
 import type { TypeTable } from "./types.js";
 import {
   CAN_BUILD,
@@ -130,6 +131,13 @@ export class World {
   readonly rng: Rng;
   readonly types: TypeTable;
   readonly players = new PlayerState();
+  /**
+   * Fog of war, per player.
+   *
+   * Part of the simulation rather than the renderer: units cannot acquire
+   * targets they cannot see, so every peer must agree on it exactly.
+   */
+  readonly vision: VisionGrid;
   /** Derived, non-hashed output for the renderer. Cleared at the start of each tick. */
   readonly events = new EventLog();
 
@@ -159,6 +167,7 @@ export class World {
     // enough that each cell holds a handful of units rather than a crowd.
     this.spatial = new SpatialHash(options.mapTiles, 2, MAX_ENTITIES);
     this.rng = new Rng(options.seed);
+    this.vision = new VisionGrid(options.mapTiles);
     this.types = options.types;
 
     // Derived from content rather than hardcoded. A neighbour query must cover
@@ -189,6 +198,10 @@ export class World {
     for (const command of commands) this.applyCommand(command);
 
     this.spatial.rebuild(this.entities);
+    // Vision first: everything after it may ask who can see whom, and a
+    // half-updated fog grid would let a unit shoot something that had already
+    // moved out of sight this tick.
+    this.vision.update(this.entities, this.types);
     runConstruction(this);
     runProduction(this);
     runEconomy(this);
@@ -214,6 +227,9 @@ export class World {
     h = hashNumber(h, this.grid.version);
     h = this.entities.hash(h);
     h = this.players.hash(h);
+    // Vision is deliberately absent: `visible` is a pure function of entity
+    // positions, which are hashed already, and `explored` is presentation
+    // state that peers are expected to differ on. See vision.ts.
     // The cost grid is hashed too: a peer that missed a building placement
     // would otherwise path differently while reporting a matching hash.
     for (let i = 0; i < this.grid.tiles.length; i++) {
