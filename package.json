@@ -16,7 +16,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint packages",
-    "typecheck": "tsc --build --force"
+    "typecheck": "tsc --build --force",
+    "build:client": "npm run build --workspace @rts/client",
+    "build:all": "tsc --build && npm run build:client",
+    "broker": "node packages/signaling/dist/server.js",
+    "serve": "npm run build:all && npm run broker"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

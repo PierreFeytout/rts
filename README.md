@@ -3,11 +3,11 @@
 A futuristic real-time strategy game. 2.5D isometric, peer-hosted multiplayer —
 the player who creates the game hosts it, with no dedicated server to deploy.
 
-**Status: M2 complete.** Deterministic lockstep netcode: host arbiter, guest
-sessions, desync detection with snapshot resync, and replays — all developed and
-tested over an in-memory transport with simulated latency and jitter. The client
-plays single-player *through the full netcode path*, so M3 changes only which
-transport is constructed. 200 units path around obstacles at ~0.7 ms/tick.
+**Status: M3 complete — it is now actually multiplayer.** Host a game, get a
+six-character code, send it to a friend, and play over a direct WebRTC
+connection. Verified between two browsers: a command issued in one moved units
+in the other's world with zero desyncs, and the match kept running after the
+signaling server was killed outright.
 
 **The simulation has been verified bit-identical between Node v22.15 and
 Chrome 148** across 600 ticks — see "Cross-runtime determinism check" below.
@@ -16,9 +16,24 @@ Chrome 148** across 600 ticks — see "Cross-runtime determinism check" below.
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173
-npm test           # simulation test suite
-npm run typecheck  # tsc project references
+npm run serve      # build everything, then serve on http://localhost:8080
+```
+
+Open it, click **Host a game**, and share the six-character code. Friends open
+the same address, type the code, and they are in. There is no waiting room —
+guests join a match already in progress, because the welcome snapshot makes late
+joining the natural case.
+
+For development, with hot reload:
+
+```bash
+npm run build && npm run broker   # signaling on :8080
+npm run dev                       # client on :5173, finds the broker automatically
+```
+
+```bash
+npm test           # 201 tests
+npm run typecheck
 npm run lint       # includes the determinism rules
 ```
 
@@ -33,7 +48,8 @@ move order, `WASD`/arrows or middle-drag to pan, wheel to zoom.
 | `packages/transport` | `Transport` interface + in-memory virtual network. No DOM, no Node. |
 | `packages/protocol` | Wire messages and MessagePack codec |
 | `packages/netcode` | Host arbiter, guest session, replay. No DOM, no Node. |
-| `packages/client` | Vite + Three.js renderer, input, hosts the local session |
+| `packages/signaling` | The one always-on process: WebSocket broker + static file server |
+| `packages/client` | Vite + Three.js renderer, lobby, input |
 
 Inside `packages/sim`: `fixed` (Q16.16 math), `rng`, `clock` (tick pacing),
 `hash` (state hashing), `entities` (SoA store), `grid` (passability),
@@ -45,8 +61,7 @@ Three packages deliberately avoid both DOM and Node types. That is what lets the
 identical arbiter run in the host's browser tab today and in a headless
 dedicated server later, with only the transport swapped.
 
-Planned: `content` (race/unit definitions), `signaling` (join-code broker),
-plus a WebRTC implementation of `Transport`.
+Planned: `content` (race/unit definitions).
 
 ## The one rule that matters
 
@@ -132,6 +147,56 @@ the replay. `playReplay` reports the first diverging checkpoint rather than a
 bare pass/fail, because "it ended wrong" is far less useful than "it went wrong
 between tick 300 and 400".
 
+## Connecting players
+
+Three pieces, and it matters which is which when something fails:
+
+1. **The signaling broker** (`packages/signaling`) — the only always-on process.
+   It holds a map of join code to host connection and relays WebRTC offers,
+   answers and ICE candidates between peers who cannot yet talk directly. It
+   never sees a game command. Rooms are capped, messages are rate limited, and a
+   guest may only address the host — one guest cannot signal another, so it can
+   neither spray strangers nor probe who else is in the room.
+2. **WebRTC DataChannels** — the actual gameplay path, ordered and fully
+   reliable. Lockstep requires reliability: a dropped position update is a
+   cosmetic glitch, a dropped command puts two players in different worlds
+   permanently.
+3. **STUN** — lets peers find their own public address and punch through most
+   home NATs with nobody configuring a router.
+
+**Once the DataChannel opens, the broker is irrelevant.** Verified by killing
+the broker process mid-match: the guest issued an order afterwards, it reached
+the host's authoritative log, all 40 units obeyed, and desyncs stayed at zero.
+If the broker goes down, running games are unaffected — you just cannot start
+new ones.
+
+Roles are fixed and asymmetric — the host always offers, guests always answer —
+so none of WebRTC's "perfect negotiation" glare handling is needed. That
+machinery exists for peers that may both initiate at once, which cannot happen
+in a star topology.
+
+### When a connection fails
+
+The lobby distinguishes the failure modes, because they need different fixes and
+look identical to a player otherwise:
+
+- *Cannot reach the lobby server* — the broker is down or the URL is wrong.
+- *No game with that code* — mistyped, or the host restarted.
+- ICE failure with only `host` candidates — STUN never returned a public
+  address.
+- ICE failure having seen `relay` — even TURN did not help.
+
+**Known gap: no TURN server is configured.** STUN handles the large majority of
+home-to-home connections, but symmetric NAT (some corporate networks, many
+mobile carriers, CGNAT ISPs) needs a relay. This is affordable here in a way it
+would not be for most games — lockstep sends only commands, a few KB/s per
+player regardless of army size — so running `coturn` alongside the broker is
+cheap. Worth adding once real-world success rates are known; add it to
+`iceServers` in `webrtc-types.ts`.
+
+**WebRTC requires a secure context**, so a deployed client must be served over
+HTTPS. `localhost` is exempt, which is why local testing works without it.
+
 ## Things that are easy to get wrong
 
 Learned while building M0, recorded so they are not re-learned:
@@ -173,6 +238,21 @@ Learned while building M0, recorded so they are not re-learned:
 - **Snapshots arrive from the wire with no alignment guarantee.** An
   `Int32Array` view over a misaligned byte offset throws; `decodeSnapshot`
   re-copies when needed.
+- **A peer connection reaching `connected` does not mean you can send.** The
+  data channel has its own `open` event, and that is the one that gates the
+  handshake. Starting earlier drops the first messages silently.
+- **ICE candidates routinely arrive before the description they belong to.**
+  `addIceCandidate` throws in that window, so they must be queued rather than
+  discarded — dropping one is a classic cause of "works on my LAN, fails over
+  the internet", because the discarded candidate was the only route that would
+  have worked.
+- **`send()` copies before handing bytes to the channel.** A `Uint8Array` view
+  over a larger pooled buffer would otherwise be transmitted in full, silently
+  corrupting the stream with neighbouring bytes.
+- **Terrain is rendered from the cost grid, not from the rectangles that made
+  it.** A guest receives a world snapshot containing the grid and never sees the
+  generation inputs, so anything reconstructed from those would simply be
+  missing on every peer but the host.
 
 ## Debug tooling
 
@@ -195,7 +275,7 @@ tooling captures nothing there, while a WebGL readback still works.
 - **M0** — Skeleton, fixed-point math, tick loop, isometric renderer ✅
 - **M1** — Simulation core: entity store, spatial hash, flow-field pathing, state hashing ✅
 - **M2** — Netcode: protocol, transport interface, host arbiter, desync detection, replays ✅
-- **M3** — WebRTC + lobby: signaling broker, join codes, connection diagnostics
+- **M3** — WebRTC + lobby: signaling broker, join codes, connection diagnostics ✅
 - **M4** — Gameplay: harvesting, construction, production, combat, victory
 - **M5** — Content system: zod-validated race definitions, behavior registry, stub race #2
 - **M6** — Presentation: fog of war, minimap, control groups, command UI, art pass

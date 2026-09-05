@@ -1,10 +1,23 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/sim" },
-    { "path": "./packages/transport" },
-    { "path": "./packages/protocol" },
-    { "path": "./packages/netcode" },
-    { "path": "./packages/client" }
+    {
+      "path": "./packages/sim"
+    },
+    {
+      "path": "./packages/transport"
+    },
+    {
+      "path": "./packages/protocol"
+    },
+    {
+      "path": "./packages/netcode"
+    },
+    {
+      "path": "./packages/client"
+    },
+    {
+      "path": "./packages/signaling"
+    }
   ]
 }
