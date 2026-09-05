@@ -1,4 +1,11 @@
-import { decodeSnapshot, encodeSnapshot, type Command, type World } from "@rts/sim";
+import { decodeBinary, encodeBinary } from "@rts/protocol";
+import {
+  SNAPSHOT_VERSION,
+  decodeSnapshot,
+  encodeSnapshot,
+  type Command,
+  type World,
+} from "@rts/sim";
 
 /**
  * Replay recording and playback.
@@ -48,11 +55,36 @@ export class ReplayRecorder {
     }
   }
 
+  /**
+   * Sample a checkpoint hash, without recording commands.
+   *
+   * For the live host, which already keeps the authoritative command log --
+   * calling `record` as well would hold a second copy of every command array
+   * for the length of the match. Checkpoints are the only thing that has to be
+   * captured as it happens, because a hash cannot be recovered afterwards.
+   */
+  checkpoint(world: World): void {
+    if (world.tick % this.checkpointInterval === 0) {
+      this.checkpoints.push({ tick: world.tick, hash: world.hash() });
+    }
+  }
+
   finish(world: World): Replay {
     return {
       initialSnapshot: this.initialSnapshot,
       initialTick: this.initialTick,
       commands: this.commands,
+      finalHash: world.hash(),
+      checkpoints: this.checkpoints,
+    };
+  }
+
+  /** Finish using a command log kept elsewhere, such as the host's. */
+  finishFrom(world: World, commands: readonly Command[][]): Replay {
+    return {
+      initialSnapshot: this.initialSnapshot,
+      initialTick: this.initialTick,
+      commands: commands.map((tick) => [...tick]),
       finalHash: world.hash(),
       checkpoints: this.checkpoints,
     };
@@ -99,4 +131,75 @@ export function playReplay(world: World, replay: Replay): ReplayResult {
     divergedAtTick,
     ticksPlayed: replay.commands.length,
   };
+}
+
+// ---------------------------------------------------------------------------
+// File format
+// ---------------------------------------------------------------------------
+
+/**
+ * Replay file version.
+ *
+ * A replay is only meaningful against the build that produced it: it is a
+ * command stream, and the simulation is what turns commands into a match.
+ * Change the simulation and the same commands produce a different game, which
+ * is not a bug but does mean an old file cannot be trusted. The snapshot
+ * version is folded in for the same reason -- it moves whenever the world's
+ * shape does.
+ */
+export const REPLAY_FORMAT = 1;
+
+export interface ReplayFile {
+  format: number;
+  snapshotVersion: number;
+  /** Content fingerprint, so a replay recorded against other content is refused. */
+  contentHash: number;
+  /** Milliseconds since the epoch, for sorting a folder of them. */
+  recordedAt: number;
+  replay: Replay;
+}
+
+/** Serialise a replay for saving to disk. */
+export function encodeReplay(replay: Replay, contentHash: number, recordedAt: number): Uint8Array {
+  const file: ReplayFile = {
+    format: REPLAY_FORMAT,
+    snapshotVersion: SNAPSHOT_VERSION,
+    contentHash,
+    recordedAt,
+    replay,
+  };
+  return encodeBinary(file);
+}
+
+/**
+ * Read a replay file, refusing anything this build cannot faithfully replay.
+ *
+ * Refusing loudly matters more here than almost anywhere else. A replay that
+ * loads but diverges looks exactly like a simulation bug, and someone would
+ * reasonably spend a day chasing it.
+ */
+export function decodeReplay(data: Uint8Array, contentHash: number): Replay {
+  const file = decodeBinary(data) as Partial<ReplayFile> | null;
+  if (!file || typeof file !== "object" || file.replay === undefined) {
+    throw new Error("not a replay file");
+  }
+  if (file.format !== REPLAY_FORMAT) {
+    throw new Error(`replay format ${file.format}, this build reads ${REPLAY_FORMAT}`);
+  }
+  if (file.snapshotVersion !== SNAPSHOT_VERSION) {
+    throw new Error(
+      `replay was recorded by a different build (snapshot v${file.snapshotVersion}, ` +
+        `this build v${SNAPSHOT_VERSION})`,
+    );
+  }
+  if (contentHash !== 0 && file.contentHash !== contentHash) {
+    throw new Error("replay was recorded against different content");
+  }
+  const replay = file.replay;
+  // msgpack gives back a plain object; the snapshot must be a byte view or
+  // `decodeSnapshot` will read garbage rather than fail.
+  if (!(replay.initialSnapshot instanceof Uint8Array)) {
+    replay.initialSnapshot = new Uint8Array(replay.initialSnapshot as ArrayLike<number>);
+  }
+  return replay;
 }

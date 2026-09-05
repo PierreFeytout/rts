@@ -1,3 +1,4 @@
+import { ReplayRecorder, type Replay } from "@rts/netcode";
 import type { GuestSession, HostSession } from "@rts/netcode";
 import { TICK_HZ, TICK_MS, hashToString, type Command, type World } from "@rts/sim";
 import * as THREE from "three";
@@ -21,9 +22,25 @@ import { WorldRenderer } from "./world-renderer.js";
  * on who is arbitrating.
  */
 
+/**
+ * What the match screen needs from whatever is driving ticks.
+ *
+ * Narrow on purpose. `HostSession`, `GuestSession` and `ReplaySession` all
+ * satisfy it, which is why watching a replay reuses the entire match screen --
+ * the renderer, fog, minimap and HUD are the real ones and none of them knows
+ * the difference.
+ */
+export interface MatchSession {
+  update(deltaMs: number): number;
+  readonly alpha: number;
+  submitLocal(command: Command): void;
+  onBeforeTick?: ((world: World) => void) | undefined;
+  onAfterTick?: ((world: World) => void) | undefined;
+}
+
 export interface GameOptions {
   world: World;
-  session: HostSession | GuestSession;
+  session: MatchSession;
   localPlayer: number;
   isHost: boolean;
   mapTiles: number;
@@ -41,7 +58,22 @@ export interface GameStatus {
 
 export interface RunningGame {
   world: World;
-  session: HostSession | GuestSession;
+  session: MatchSession;
+  /**
+   * Swap in a new session after a reconnect.
+   *
+   * The world object is unchanged -- the renderer, selection and HUD all hold
+   * a reference to it -- so only the thing driving ticks is replaced.
+   */
+  setSession: (next: MatchSession) => void;
+  /**
+   * The match so far, as a replay. Host only -- a guest never sees the
+   * authoritative command log, and reconstructing one from its own schedules
+   * would be a second, less trustworthy source of truth.
+   */
+  saveReplay: (() => Replay) | null;
+  /** Shown over the match while a reconnect is in progress. */
+  setBanner: (message: string | null) => void;
   rig: IsoCamera;
   selection: Selection;
   /** Exposed for the dev console: inspecting materials beats guessing. */
@@ -54,7 +86,8 @@ export interface RunningGame {
 }
 
 export function startGame(options: GameOptions): RunningGame {
-  const { world, session, localPlayer, isHost, mapTiles } = options;
+  const { world, localPlayer, isHost, mapTiles } = options;
+  let session = options.session;
 
   const canvas = document.querySelector<HTMLCanvasElement>("#viewport")!;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -119,18 +152,38 @@ export function startGame(options: GameOptions): RunningGame {
   // that a step produced -- both per tick, not per frame. A renderer that
   // sampled after `update()` would miss every tick but the last of a catch-up
   // burst, which is exactly when the most is happening.
-  session.onBeforeTick = (w) => units.capturePrevious(w);
-  session.onAfterTick = (w) => {
-    effects.ingest(w);
-    hud.ingest(w);
-  };
+  function wireTickHooks(target: MatchSession): void {
+    target.onBeforeTick = (w) => units.capturePrevious(w);
+    target.onAfterTick = (w) => {
+      effects.ingest(w);
+      hud.ingest(w);
+      recorder?.checkpoint(w);
+    };
+  }
+  wireTickHooks(session);
 
   // Frame the player's own units, so a guest does not open looking at empty map.
   centreOnPlayerUnits(world, localPlayer, rig, mapTiles);
 
+  // Replay recording, host only. The host's command log IS the replay -- that
+  // is the dividend lockstep pays -- so the only thing that has to be captured
+  // during play is the state it started from, plus the occasional checkpoint
+  // hash so a divergence can be bisected rather than merely detected.
+  const recorder = isHost ? new ReplayRecorder(world) : null;
+
   // ---------------------------------------------------------------------------
 
   const debug = document.querySelector<HTMLDivElement>("#hud")!;
+
+  // Match-level status, shown over everything. Distinct from the HUD's own
+  // transient toasts: this one stays up until the situation resolves.
+  const banner = document.createElement("div");
+  banner.style.cssText =
+    "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:16;display:none;" +
+    "padding:14px 26px;border:1px solid #5a2f2a;border-radius:8px;background:rgba(8,12,20,0.92);" +
+    "color:#ffb4a0;backdrop-filter:blur(4px);" +
+    "font:15px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
+  document.body.appendChild(banner);
   let lastFrameMs = performance.now();
   let lastPumpMs = lastFrameMs;
   let framesThisSecond = 0;
@@ -280,7 +333,24 @@ export function startGame(options: GameOptions): RunningGame {
 
   return {
     world,
-    session,
+    get session() {
+      return session;
+    },
+    setSession(next: MatchSession) {
+      session = next;
+      wireTickHooks(next);
+      // The clock restarts from now. Without this the first pump after a
+      // reconnect is handed however many seconds the player spent offline and
+      // tries to run every one of those ticks at once.
+      lastPumpMs = performance.now();
+    },
+    saveReplay: recorder
+      ? () => recorder.finishFrom(world, (session as HostSession).log)
+      : null,
+    setBanner(message: string | null) {
+      banner.textContent = message ?? "";
+      banner.style.display = message === null ? "none" : "block";
+    },
     rig,
     selection,
     scene,
@@ -297,6 +367,7 @@ export function startGame(options: GameOptions): RunningGame {
       controls.dispose();
       selection.dispose();
       hud.dispose();
+      banner.remove();
       groups.dispose();
       minimap.dispose();
       fog.dispose();

@@ -22,6 +22,7 @@ describe("codec", () => {
       t: MSG_HELLO,
       protocol: PROTOCOL_VERSION,
       contentHash: 0xdeadbeef,
+      token: "abc123",
       name: "pierre",
     };
     expect(roundTrip(m)).toEqual(m);

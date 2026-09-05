@@ -11,7 +11,14 @@ import {
   encodeMessage,
   tryDecodeMessage,
 } from "@rts/protocol";
-import { TICK_MS, TickClock, encodeSnapshot, type Command, type World } from "@rts/sim";
+import {
+  MAX_PLAYERS,
+  TICK_MS,
+  TickClock,
+  encodeSnapshot,
+  type Command,
+  type World,
+} from "@rts/sim";
 import type { PeerId, Transport } from "@rts/transport";
 
 /**
@@ -83,7 +90,10 @@ export interface HostOptions {
 }
 
 interface PlayerSlot {
+  /** Current socket. Changes when the player reconnects. */
   peer: PeerId;
+  /** Stable across reconnects. See HelloMessage.token. */
+  token: string;
   playerId: number;
   name: string;
   connected: boolean;
@@ -117,6 +127,13 @@ export class HostSession {
   /** Our own hash at each recent tick, for comparing against guest reports. */
   private readonly hashes = new Map<number, number>();
   private readonly slots = new Map<PeerId, PlayerSlot>();
+  /**
+   * The same slots, keyed by the identity that survives a reconnect.
+   *
+   * Two indexes rather than one because both lookups are on hot paths: every
+   * inbound message resolves a peer, and every hello resolves a token.
+   */
+  private readonly byToken = new Map<string, PlayerSlot>();
 
   /** Every schedule broadcast this match, in tick order. The replay log. */
   readonly log: Command[][] = [];
@@ -136,14 +153,17 @@ export class HostSession {
     this.onAfterTick = options.onAfterTick;
 
     // The host always occupies player slot 0.
-    this.slots.set(this.transport.localPeer, {
+    const hostSlot: PlayerSlot = {
       peer: this.transport.localPeer,
+      token: "host",
       playerId: 0,
       name: "host",
       connected: true,
       lastVerifiedTick: 0,
       lateCommands: 0,
-    });
+    };
+    this.slots.set(this.transport.localPeer, hostSlot);
+    this.byToken.set(hostSlot.token, hostSlot);
 
     this.transport.on("message", this.handleMessage);
     this.transport.on("peerLeave", this.handleLeave);
@@ -245,7 +265,7 @@ export class HostSession {
 
     switch (message.t) {
       case MSG_HELLO: {
-        this.handleHello(from, message.protocol, message.contentHash, message.name);
+        this.handleHello(from, message.protocol, message.contentHash, message.token, message.name);
         break;
       }
 
@@ -277,6 +297,7 @@ export class HostSession {
     from: PeerId,
     protocol: number,
     contentHash: number,
+    token: string,
     name: string,
   ): void {
     if (protocol !== PROTOCOL_VERSION) {
@@ -307,14 +328,33 @@ export class HostSession {
       return;
     }
 
-    let slot = this.slots.get(from);
-    if (!slot) {
+    // Returning player, new socket. Matching on the token rather than the peer
+    // is the whole of reconnect support: the slot, the player id and therefore
+    // every unit on the field come back with them.
+    let slot = this.byToken.get(token);
+    if (slot) {
+      if (slot.peer !== from) {
+        this.slots.delete(slot.peer);
+        slot.peer = from;
+        this.slots.set(from, slot);
+      }
+      slot.connected = true;
+      slot.name = name;
+    } else {
       // Lowest unused player id, so ids stay dense and reproducible.
       const taken = new Set([...this.slots.values()].map((s) => s.playerId));
       let playerId = 0;
       while (taken.has(playerId)) playerId++;
+      if (playerId >= MAX_PLAYERS) {
+        this.transport.send(
+          from,
+          encodeMessage({ t: MSG_REJECT, reason: `the match is full (${MAX_PLAYERS} players)` }),
+        );
+        return;
+      }
       slot = {
         peer: from,
+        token,
         playerId,
         name,
         connected: true,
@@ -322,9 +362,7 @@ export class HostSession {
         lateCommands: 0,
       };
       this.slots.set(from, slot);
-    } else {
-      slot.connected = true;
-      slot.name = name;
+      this.byToken.set(token, slot);
     }
 
     // Hand over authoritative state rather than construction parameters. Two

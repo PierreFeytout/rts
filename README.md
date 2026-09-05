@@ -3,8 +3,9 @@
 A futuristic real-time strategy game. 2.5D isometric, peer-hosted multiplayer —
 the player who creates the game hosts it, with no dedicated server to deploy.
 
-**Status: M6 complete — fog of war, a minimap, control groups, and units that
-look like units.** Gather alloy, tap geothermal vents for plasma, build a base, train an
+**Status: M7 complete — the game is finished and deployable.** One container
+serves the client and the lobby, guests survive a dropped connection, and every
+match can be saved and watched back. Gather alloy, tap geothermal vents for plasma, build a base, train an
 army, and destroy your opponent. Peer-hosted: one player creates the game, gets
 a six-character code, and everyone else joins over a direct WebRTC connection
 with no dedicated server anywhere.
@@ -45,7 +46,7 @@ npm run dev                       # client on :5173, finds the broker automatica
 ```
 
 ```bash
-npm test           # 295 tests
+npm test           # 301 tests
 npm run typecheck
 npm run lint       # includes the determinism rules
 ```
@@ -60,6 +61,9 @@ npm run lint       # includes the determinism rules
 | `Ctrl+1`..`9` | assign a control group |
 | `1`..`9` | recall a group; press twice to centre the camera on it |
 | click/drag minimap | jump the camera |
+
+The host gets a **save replay** button; anyone can load one from the lobby with
+**Watch a replay**.
 | `S` / `H` | stop / hold position |
 | `Esc` | cancel a pending build placement |
 | `WASD`, arrows, middle-drag | pan |
@@ -235,18 +239,12 @@ look identical to a player otherwise:
 - *No game with that code* — mistyped, or the host restarted.
 - ICE failure with only `host` candidates — STUN never returned a public
   address.
-- ICE failure having seen `relay` — even TURN did not help.
+- ICE failure having seen `relay` — even a TURN relay did not help.
 
-**Known gap: no TURN server is configured.** STUN handles the large majority of
-home-to-home connections, but symmetric NAT (some corporate networks, many
-mobile carriers, CGNAT ISPs) needs a relay. This is affordable here in a way it
-would not be for most games — lockstep sends only commands, a few KB/s per
-player regardless of army size — so running `coturn` alongside the broker is
-cheap. Worth adding once real-world success rates are known; add it to
-`iceServers` in `webrtc-types.ts`.
-
-**WebRTC requires a secure context**, so a deployed client must be served over
-HTTPS. `localhost` is exempt, which is why local testing works without it.
+A relay is what gets symmetric-NAT players through, and one ships in the compose
+file — see "Deploying it" below. **WebRTC also requires a secure context**, so
+a deployed client must be served over HTTPS; `localhost` is exempt, which is why
+local testing works without one.
 
 ## The game
 
@@ -376,6 +374,110 @@ exceeds weapon range, and the loader **refuses** content where it does not: a
 unit that can shoot further than it can see is blind inside its own firing
 envelope and never engages, which reads as a broken weapon rather than as a
 content mistake.
+
+## Deploying it
+
+One container. The broker serves the built client as static files, so a
+deployment is not a web host plus a WebSocket service:
+
+```bash
+cd docker
+cp .env.example .env      # set DOMAIN and ACME_EMAIL
+docker compose --profile tls up -d
+```
+
+**HTTPS is not optional.** WebRTC refuses to run outside a secure context, so
+anything reachable by a hostname needs a real certificate before it works at
+all. `localhost` is exempt, which is why local testing works without one. Caddy
+is in the compose file for exactly this: it obtains and renews the certificate
+by itself.
+
+The image build runs `typecheck`, `lint` and the full test suite before it
+produces a runtime layer. An image that builds but fails its own determinism
+tests is worse than a failed build.
+
+### TURN, and why it is affordable here
+
+Public STUN gets the large majority of home-to-home connections through. It
+fails behind **symmetric NAT** — some corporate networks, most mobile carriers,
+CGNAT ISPs — where the only way through is a relay.
+
+```bash
+docker compose --profile tls --profile turn up -d
+```
+
+This is where the netcode choice pays off in operational cost. Lockstep sends
+only commands, so a relayed match is a few KB/s per player; a state-sync game
+relaying world snapshots would make running your own relay prohibitive.
+
+ICE configuration is served by the broker at `/ice` rather than baked into the
+client bundle, so rotating a TURN password does not mean rebuilding and
+redeploying the client. The client falls back to public STUN if that endpoint is
+missing, so an older broker still works.
+
+## Reconnecting
+
+A data channel dies for reasons that have nothing to do with either player: a
+laptop sleeps, a phone changes cell, a router drops a NAT binding after a quiet
+minute. Without reconnect support any of those ends the match for that person
+and leaves their army standing on the field being shot.
+
+Two earlier decisions are what make it work:
+
+- The host keeps a disconnected player's slot, keyed by a **token the client
+  generates** rather than by the peer id. A peer id is the identity of a
+  *socket*; reconnecting through the broker produces a new one, so keying on it
+  would hand a returning player a fresh empty slot.
+- Match state is exchanged as a snapshot rather than replayed, so catching up
+  after any length of absence costs one message.
+
+The token has **no default**, deliberately. A shared default is worse than none:
+two guests carrying the same one are, to the host, the same player reconnecting,
+so the second silently takes over the first's slot and army. That is exactly
+what happened the first time it had one, and the test suite now pins it.
+
+It is not a credential. Anyone who can reach the host can claim any token they
+have seen; the guarantee is "the same browser gets the same slot", not "nobody
+else can take it". A four-player game between friends has no account system to
+check it against, and inventing one would be security theatre.
+
+Joining and rejoining are literally the same function, which is what stops
+reconnect from being a subtly different, less-tested version of joining.
+
+**The host still cannot be replaced.** If the host leaves, the match ends. Host
+migration is genuinely tractable — under lockstep every peer already holds
+bit-identical state, so it is a matter of re-electing the clock owner rather
+than transferring a world — but it is not built.
+
+## Replays
+
+Replays cost nothing to record, which is a direct dividend of lockstep: **the
+command log the arbiter already broadcasts *is* the replay**. A file is the
+initial snapshot plus that log, so nothing has to be captured during play except
+the occasional checkpoint hash — and a hash cannot be recovered afterwards,
+which is the one thing that does have to happen live.
+
+A 32-second match with a running economy is about 22 kB, and almost all of that
+is the initial snapshot. The marginal cost per tick is a few bytes.
+
+Playback reuses the **entire** match screen. `HostSession`, `GuestSession` and
+`ReplaySession` all satisfy one narrow interface — `update`, `alpha`,
+`submitLocal`, two tick hooks — so the renderer, fog, minimap and HUD are the
+real ones and none of them knows the difference. Seeking backwards replays from
+the start, because a simulation step is not invertible; there is no way to
+un-kill a unit.
+
+Replays are also the sharpest determinism test available. `__rts.verifyReplay()`
+round-trips the current match through the file format and re-simulates it: if
+the recorded and replayed hashes differ, the simulation has a non-determinism,
+and one that fails reproducibly is far easier to find than a desync report from
+a friend.
+
+A replay is only meaningful against the build that recorded it — it is a command
+stream, and the simulation is what turns commands into a match. The file carries
+the format version, the snapshot version and the content hash, and loading
+refuses on any mismatch. A replay that loaded but diverged would look exactly
+like a simulation bug, and someone would reasonably spend a day chasing it.
 
 ## Adding a race
 
@@ -621,6 +723,23 @@ Learned while building this, recorded so they are not re-learned:
 - **The HUD must not hash the world every frame.** `world.hash()` walks every
   entity, every player and the full cost grid. That is cheap at 20 Hz and
   wasteful at 240; the debug readout refreshes a few times a second instead.
+- **A peer id identifies a socket, not a player.** Reconnecting produces a new
+  one, so anything keyed on it forgets who you were. Player slots are keyed on
+  a client-generated token instead.
+- **An identity with a default is not an identity.** Three guests sharing a
+  default token collapsed into one player slot, each silently evicting the last.
+  `token` is now required, which makes the mistake impossible rather than
+  merely documented.
+- **A re-welcome must empty the schedule buffer.** Those ticks are already baked
+  into the snapshot the host sends on rejoining; merging the old buffer back in
+  runs their commands a second time, which is a desync that looks like a
+  simulation bug.
+- **Close the old transport before opening the new one.** Two live peer
+  connections to the same host both receive tick schedules, and the session that
+  loses the race keeps stepping a world nobody is watching.
+- **Reject an out-of-range player slot at the door.** Player ids index
+  fixed-size per-player arrays in the simulation; a fifth player would read past
+  the end of every one of them.
 
 ## Debug tooling
 
@@ -632,6 +751,8 @@ __rts.renderFrame()      // render once, without waiting for rAF
 __rts.capture('name')    // save a PNG to .captures/ via the dev server
 __rts.determinism()      // run the cross-runtime fixture, print its hash trace
 __rts.reveal(true)       // lift the fog, for watching what an opponent is doing
+__rts.verifyReplay()     // round-trip this match through the file format and re-simulate
+__rts.saveReplay()       // the match so far, as a Replay object (host only)
 __rts.scene              // the three.js scene: inspecting materials beats guessing
 __rts.session            // the HostSession: .log, .tick, .inputDelay, .desyncs
 ```
@@ -649,4 +770,4 @@ tooling captures nothing there, while a WebGL readback still works.
 - **M4** — Gameplay: harvesting, construction, production, combat, victory ✅
 - **M5** — Content system: zod-validated race definitions, behaviour registry, race #2 ✅
 - **M6** — Presentation: fog of war, minimap, control groups, command UI, art pass ✅
-- **M7** — Ship: broker deployment, reconnect, replay playback
+- **M7** — Ship: broker deployment, reconnect, replay playback ✅

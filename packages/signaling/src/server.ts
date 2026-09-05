@@ -17,9 +17,13 @@ import { Broker, type BrokerSocket } from "./broker.js";
  * Configuration is by environment variable so it can run unchanged on a free
  * tier, a Raspberry Pi, or behind a reverse proxy:
  *
- *   PORT        listen port (default 8080)
- *   HOST        bind address (default 0.0.0.0)
- *   CLIENT_DIR  directory of built client files (default ../client/dist)
+ *   PORT           listen port (default 8080)
+ *   HOST           bind address (default 0.0.0.0)
+ *   CLIENT_DIR     directory of built client files (default ../client/dist)
+ *   STUN_URLS      comma-separated STUN urls (default: two public Google ones)
+ *   TURN_URL       TURN url, e.g. turn:relay.example.com:3478
+ *   TURN_USER      TURN username
+ *   TURN_PASSWORD  TURN credential
  */
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -100,7 +104,51 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): void {
   createReadStream(file).pipe(res);
 }
 
+/**
+ * ICE configuration, served to clients at connect time.
+ *
+ * The broker is the natural home for it: it is the one always-on process, it
+ * already knows the deployment, and shipping the credentials in the client
+ * bundle would mean rebuilding the client to rotate a TURN password.
+ *
+ * TURN matters because STUN alone fails behind symmetric NAT -- some corporate
+ * networks, most mobile carriers, and CGNAT ISPs. Lockstep is what makes
+ * relaying affordable: only commands cross the wire, so a relayed match costs a
+ * few KB/s per player rather than a stream of world state.
+ */
+function iceConfiguration(): { iceServers: Array<Record<string, string>> } {
+  const stun = (process.env.STUN_URLS ?? "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302")
+    .split(",")
+    .map((url) => url.trim())
+    .filter((url) => url.length > 0);
+
+  const servers: Array<Record<string, string>> = stun.map((urls) => ({ urls }));
+
+  const turnUrl = process.env.TURN_URL;
+  if (turnUrl) {
+    // Credentials are only omitted when neither is set, so a half-configured
+    // TURN server produces an obviously broken entry rather than one that
+    // silently fails to authenticate at the worst possible moment.
+    servers.push({
+      urls: turnUrl,
+      username: process.env.TURN_USER ?? "",
+      credential: process.env.TURN_PASSWORD ?? "",
+    });
+  }
+
+  return { iceServers: servers };
+}
+
 const httpServer = createServer((req, res) => {
+  if (req.url === "/ice") {
+    res.writeHead(200, {
+      "content-type": "application/json",
+      // Credentials can be rotated; a cached copy would outlive the rotation.
+      "cache-control": "no-store",
+    });
+    res.end(JSON.stringify(iceConfiguration()));
+    return;
+  }
   if (req.url === "/healthz") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ ok: true, ...broker.stats() }));
@@ -162,6 +210,11 @@ setInterval(() => {
 httpServer.listen(PORT, HOST, () => {
   console.log(`[rts] http://${HOST}:${PORT}  (signaling on /signal)`);
   console.log(`[rts] serving client from ${CLIENT_DIR}`);
+  console.log(
+    process.env.TURN_URL
+      ? `[rts] TURN relay configured: ${process.env.TURN_URL}`
+      : "[rts] no TURN relay configured -- players behind symmetric NAT will fail to connect",
+  );
   if (!existsSync(CLIENT_DIR)) {
     console.warn(`[rts] WARNING: ${CLIENT_DIR} does not exist -- build the client first`);
   }

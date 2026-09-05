@@ -100,6 +100,7 @@ function makeHarness(guestCount: number, latencyMs = 40, jitterMs = 0): Harness 
       world: buildWorld(1),
       transport,
       name: `guest${g}`,
+      token: `token-${g}`,
     });
     guests.push(guest);
     guest.connect();
@@ -164,6 +165,7 @@ describe("handshake", () => {
     const guest = new GuestSession({
       world: buildWorld(),
       transport: guestTransport,
+      token: "old-client",
       onReject: (reason) => {
         rejection = reason;
       },
@@ -172,7 +174,7 @@ describe("handshake", () => {
     // Hand-roll a hello claiming an impossible version.
     guestTransport.send(
       0,
-      encodeMessage({ t: MSG_HELLO, protocol: 999, contentHash: 0, name: "old" }),
+      encodeMessage({ t: MSG_HELLO, protocol: 999, contentHash: 0, token: "old", name: "old" }),
     );
     net.advance(50);
 

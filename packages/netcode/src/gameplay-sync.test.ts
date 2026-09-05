@@ -122,6 +122,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     transport: guestTransport,
     hashInterval: 20,
     name: "guest",
+    token: "guest-token",
     contentHash: options.guestContent ?? content.hash,
     onReject: (reason) => {
       rejection = reason;

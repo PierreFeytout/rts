@@ -1,7 +1,12 @@
 import { defaultContent } from "@rts/content";
-import { GuestSession, HostSession } from "@rts/netcode";
+import { HostSession, decodeReplay } from "@rts/netcode";
 import type { World } from "@rts/sim";
 import { SignalingClient, VirtualNetwork, WebRtcTransport, type PeerDiagnostic } from "@rts/transport";
+import { joinMatch, type GuestConnection } from "./connect.js";
+import type { MatchSession } from "./game.js";
+import { playerToken } from "./identity.js";
+import { iceServers } from "./ice.js";
+import { ReplaySession } from "./replay-session.js";
 import { RACE_IDS, createEmptyWorld, createMatchWorld, type FactionMode } from "./match.js";
 
 /**
@@ -16,12 +21,34 @@ import { RACE_IDS, createEmptyWorld, createMatchWorld, type FactionMode } from "
 
 export interface LobbyResult {
   world: World;
-  session: HostSession | GuestSession;
+  /**
+   * Whatever will drive ticks. A live session when playing, a `ReplaySession`
+   * when watching -- the match screen treats all three identically.
+   */
+  session: MatchSession;
   localPlayer: number;
   isHost: boolean;
   joinCode?: string;
   /** Kept alive for the whole match: the host needs it to accept more players. */
   signaling?: SignalingClient;
+  /**
+   * Everything a guest needs to rebuild its connection after a drop.
+   *
+   * Absent for the host and for solo play, which is the honest shape: the host
+   * has nobody to reconnect *to*, and a lost host ends the match. Host
+   * migration is tractable -- under lockstep every peer already holds identical
+   * state, so it is a matter of re-electing the clock owner rather than
+   * transferring a world -- but it is not built.
+   */
+  reconnect?: {
+    brokerUrl: string;
+    code: string;
+    token: string;
+    name: string;
+    connection: GuestConnection;
+  };
+  /** Set when watching a recording rather than playing. */
+  replay?: ReplaySession;
 }
 
 /**
@@ -107,13 +134,16 @@ export function showLobby(): Promise<LobbyResult> {
 
     // --- host ---------------------------------------------------------------
 
-    root.querySelector<HTMLButtonElement>("#btn-host")!.onclick = () => {
+    root.querySelector<HTMLButtonElement>("#btn-host")!.onclick = async () => {
       panel.classList.add("busy");
       say("contacting the lobby server...");
 
       const world = createMatchWorld((Math.random() * 0x7fffffff) | 0, chosenFactions());
       let transport: WebRtcTransport | null = null;
       let session: HostSession | null = null;
+      // Fetched before the room is created, so every peer connection the host
+      // makes from here on already has the relay configured.
+      const ice = await iceServers(brokerUrl());
 
       const signaling: SignalingClient = new SignalingClient({
         url: brokerUrl(),
@@ -122,6 +152,7 @@ export function showLobby(): Promise<LobbyResult> {
             signaling,
             localPeer: 0,
             isHost: true,
+            iceServers: ice,
             onDiagnostic: () => showDiagnostics(transport?.diagnostics ?? []),
           });
           session = new HostSession({ world, transport, contentHash: defaultContent.hash });
@@ -140,6 +171,32 @@ export function showLobby(): Promise<LobbyResult> {
       signaling.create();
     };
 
+    // --- watch a replay -----------------------------------------------------
+
+    const replayInput = root.querySelector<HTMLInputElement>("#replay-file")!;
+    root.querySelector<HTMLButtonElement>("#btn-replay")!.onclick = () => replayInput.click();
+
+    replayInput.onchange = () => {
+      const file = replayInput.files?.[0];
+      if (!file) return;
+      say(`reading ${file.name}...`);
+
+      void file
+        .arrayBuffer()
+        .then((buffer) => {
+          const replay = decodeReplay(new Uint8Array(buffer), defaultContent.hash);
+          const world = createEmptyWorld();
+          const session = new ReplaySession(world, replay);
+          finish({ world, session, localPlayer: 0, isHost: false, replay: session });
+        })
+        .catch((error: unknown) => {
+          // Refusing loudly matters here: a replay that loaded but diverged
+          // would look exactly like a simulation bug.
+          say(error instanceof Error ? error.message : "could not read that file", "error");
+          replayInput.value = "";
+        });
+    };
+
     // --- join ---------------------------------------------------------------
 
     const codeInput = root.querySelector<HTMLInputElement>("#join-code")!;
@@ -153,60 +210,43 @@ export function showLobby(): Promise<LobbyResult> {
       }
 
       panel.classList.add("busy");
-      say("contacting the lobby server...");
 
+      // Exactly the call the reconnector makes. Joining and rejoining being one
+      // code path is what stops reconnect from being a subtly different, less
+      // tested version of joining.
       const world = createEmptyWorld();
-      let transport: WebRtcTransport | null = null;
-      let guest: GuestSession | null = null;
+      const token = playerToken();
+      const name = `player ${token.slice(0, 4)}`;
+      const url = brokerUrl();
 
-      const signaling: SignalingClient = new SignalingClient({
-        url: brokerUrl(),
-        onJoined: (_code, peerId) => {
-          say(`connecting to the host directly...`);
-          transport = new WebRtcTransport({
-            signaling,
-            localPeer: peerId,
-            isHost: false,
-            onDiagnostic: () => showDiagnostics(transport?.diagnostics ?? []),
-          });
-
-          guest = new GuestSession({
+      joinMatch({
+        brokerUrl: url,
+        code,
+        world,
+        token,
+        name,
+        onStatus: (message) => say(message),
+        onDiagnostics: showDiagnostics,
+      })
+        .then((connection) => {
+          finish({
             world,
-            transport,
-            name: `player ${peerId}`,
-            contentHash: defaultContent.hash,
-            onWelcome: (playerId) => {
-              finish({
-                world,
-                session: guest!,
-                localPlayer: playerId,
-                isHost: false,
-                joinCode: code,
-                signaling,
-              });
-            },
-            onReject: (reason) => {
-              panel.classList.remove("busy");
-              say(`host refused the connection: ${reason}`, "error");
-            },
+            session: connection.session,
+            localPlayer: connection.playerId,
+            isHost: false,
+            joinCode: code,
+            signaling: connection.signaling,
+            reconnect: { brokerUrl: url, code, token, name, connection },
           });
-
-          // The handshake can only start once the data channel is actually
-          // usable; the peer connection reaching "connected" is not enough.
-          transport.on("peerJoin", () => {
-            say("connected, joining the match...");
-            guest?.connect();
-          });
-        },
-        onSignal: (from, payload) => transport?.handleSignal(from, payload),
-        onError: (code, reason) => {
+        })
+        .catch((error: unknown) => {
           panel.classList.remove("busy");
-          say(explain(code, reason), "error");
-        },
-      });
-
-      signaling.connect();
-      signaling.join(code);
+          const message = error instanceof Error ? error.message : String(error);
+          // `joinMatch` reports broker errors as "code: reason", so the
+          // actionable explanations still apply.
+          const [head, ...rest] = message.split(": ");
+          say(rest.length > 0 ? explain(head, rest.join(": ")) : message, "error");
+        });
     };
 
     joinButton.onclick = doJoin;
@@ -310,6 +350,8 @@ const LOBBY_HTML = `
 
   <button id="btn-solo">Play solo</button>
   <button id="btn-host">Host a game</button>
+  <button id="btn-replay">Watch a replay</button>
+  <input id="replay-file" type="file" accept=".rtsreplay" hidden />
 
   <hr />
 

@@ -1,0 +1,22 @@
+# HTTPS in front of the broker. Caddy obtains and renews the certificate
+# itself, which is the whole reason it is here -- WebRTC refuses to run outside
+# a secure context, so a deployment reachable by anything but localhost needs
+# a real certificate before it will work at all.
+
+{$DOMAIN} {
+	tls {$ACME_EMAIL}
+
+	# The signaling WebSocket and the static client are the same origin, so one
+	# reverse proxy covers both. Caddy upgrades WebSocket connections without
+	# any extra configuration.
+	reverse_proxy broker:8080
+
+	encode gzip
+	header {
+		# The client is a single hashed bundle, so long caching is safe, but
+		# index.html must not be cached or a deploy never reaches anyone.
+		?Cache-Control "public, max-age=31536000, immutable"
+	}
+	@html path /index.html /
+	header @html Cache-Control "no-cache"
+}

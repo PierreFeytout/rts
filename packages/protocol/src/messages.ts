@@ -17,7 +17,7 @@ import type { Command } from "@rts/sim";
  * mid-match desync with no obvious cause -- one peer silently misreading a
  * field is indistinguishable from a simulation bug.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export const MSG_HELLO = 1;
 export const MSG_WELCOME = 2;
@@ -42,6 +42,22 @@ export interface HelloMessage {
    * does not have to change later.
    */
   contentHash: number;
+  /**
+   * Stable identity for this player, across connections.
+   *
+   * A peer id is the identity of a *socket*: reconnecting through the broker
+   * produces a new one, and keying player slots on it means a returning player
+   * gets a fresh empty slot while their army sits orphaned on the field. The
+   * token is generated once by the client and survives the drop, which is what
+   * lets the host give them their own units back.
+   *
+   * It is not a credential. Anyone who can reach the host can claim any token
+   * they have seen; the guarantee it provides is "the same browser gets the
+   * same slot", not "nobody else can take it". Peer-hosted games between
+   * friends do not have an account system to check it against, and inventing
+   * one for a four-player lobby would be security theatre.
+   */
+  token: string;
   name: string;
 }
 

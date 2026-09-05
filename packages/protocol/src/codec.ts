@@ -56,3 +56,22 @@ export function tryDecodeMessage(data: Uint8Array): Message | null {
     return null;
   }
 }
+
+/**
+ * Encode an arbitrary structure with the same codec the wire uses.
+ *
+ * Exists for replays, which are files rather than messages but have exactly
+ * the same shape problem: mostly integers, with embedded binary. Reusing the
+ * codec means a replay cannot round-trip differently from the commands it was
+ * recorded from -- and those commands are simulation input, so a codec that
+ * quietly widened an integer would make a replay diverge from the match it
+ * recorded.
+ */
+export function encodeBinary(value: unknown): Uint8Array {
+  return new Uint8Array(packr.pack(value));
+}
+
+/** Decode a structure written by `encodeBinary`. Throws on malformed input. */
+export function decodeBinary(data: Uint8Array): unknown {
+  return packr.unpack(data);
+}

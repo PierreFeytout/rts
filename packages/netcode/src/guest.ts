@@ -34,6 +34,15 @@ export interface GuestOptions {
   transport: Transport;
   name?: string;
   contentHash?: number;
+  /**
+   * Stable identity across reconnects. See HelloMessage.token.
+   *
+   * Required, with no default. A shared default is worse than no default: two
+   * guests carrying the same token are, as far as the host is concerned, the
+   * same player reconnecting, so the second silently takes over the first's
+   * slot and army. That is precisely what happened the first time this had one.
+   */
+  token: string;
   /** Ticks between sending a state hash to the host. */
   hashInterval?: number;
   /**
@@ -66,6 +75,7 @@ export class GuestSession {
   private readonly maxCatchUpTicks: number;
   private readonly name: string;
   private readonly contentHash: number;
+  private readonly token: string;
   private readonly onWelcome: GuestOptions["onWelcome"];
   private readonly onReject: GuestOptions["onReject"];
   private readonly onResync: GuestOptions["onResync"];
@@ -99,6 +109,7 @@ export class GuestSession {
     this.maxCatchUpTicks = options.maxCatchUpTicks ?? 4;
     this.name = options.name ?? "player";
     this.contentHash = options.contentHash ?? 0;
+    this.token = options.token;
     this.onWelcome = options.onWelcome;
     this.onReject = options.onReject;
     this.onResync = options.onResync;
@@ -133,6 +144,7 @@ export class GuestSession {
         t: MSG_HELLO,
         protocol: PROTOCOL_VERSION,
         contentHash: this.contentHash,
+        token: this.token,
         name: this.name,
       }),
     );
@@ -224,6 +236,11 @@ export class GuestSession {
         this.playerId = message.playerId;
         this.inputDelay = message.inputDelay;
         decodeSnapshot(this.world, message.snapshot);
+        // A welcome can arrive twice: once on joining, once after a reconnect.
+        // Schedules buffered before the drop are for ticks the snapshot has
+        // already passed, and replaying them would run those commands a second
+        // time -- so the buffer is emptied rather than merged.
+        this.pending.clear();
         this.latestKnownHostTick = message.tick;
         this.joined = true;
         this.clock.reset();
