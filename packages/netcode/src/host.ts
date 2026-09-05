@@ -63,6 +63,13 @@ export interface HostOptions {
    * interpolate between ticks. Without a hook the caller would have to drive
    * ticks one at a time and duplicate the scheduling logic.
    */
+  /**
+   * Fingerprint of the loaded content, compared against each guest's.
+   *
+   * Defaults to 0, meaning "do not check" -- engine tests build worlds from
+   * fixture tables and have no content set. Real matches always pass one.
+   */
+  contentHash?: number;
   onBeforeTick?: (world: World) => void;
   /**
    * Called immediately after each `world.step`, while `world.events` still
@@ -94,6 +101,7 @@ export class HostSession {
   private readonly clock = new TickClock();
   private readonly hashInterval: number;
   private readonly hashHistory: number;
+  private readonly contentHash: number;
   private readonly onDesync: HostOptions["onDesync"];
   /**
    * Renderer hooks. Public and mutable because the renderer is built *after*
@@ -122,6 +130,7 @@ export class HostSession {
     this.inputDelay = options.inputDelay ?? 3;
     this.hashInterval = options.hashInterval ?? 30;
     this.hashHistory = options.hashHistory ?? 300;
+    this.contentHash = options.contentHash ?? 0;
     this.onDesync = options.onDesync;
     this.onBeforeTick = options.onBeforeTick;
     this.onAfterTick = options.onAfterTick;
@@ -236,7 +245,7 @@ export class HostSession {
 
     switch (message.t) {
       case MSG_HELLO: {
-        this.handleHello(from, message.protocol, message.name);
+        this.handleHello(from, message.protocol, message.contentHash, message.name);
         break;
       }
 
@@ -264,13 +273,35 @@ export class HostSession {
     }
   };
 
-  private handleHello(from: PeerId, protocol: number, name: string): void {
+  private handleHello(
+    from: PeerId,
+    protocol: number,
+    contentHash: number,
+    name: string,
+  ): void {
     if (protocol !== PROTOCOL_VERSION) {
       this.transport.send(
         from,
         encodeMessage({
           t: MSG_REJECT,
           reason: `protocol ${protocol} but host speaks ${PROTOCOL_VERSION}`,
+        }),
+      );
+      return;
+    }
+
+    // Two peers running the same code but disagreeing about how much a unit
+    // costs diverge on the first purchase, and the desync report then points at
+    // the simulation rather than at the real cause. Refusing at the door turns
+    // an afternoon of confusion into one clear sentence.
+    if (this.contentHash !== 0 && contentHash !== this.contentHash) {
+      this.transport.send(
+        from,
+        encodeMessage({
+          t: MSG_REJECT,
+          reason:
+            `content mismatch: yours is ${hex(contentHash)}, the host's is ` +
+            `${hex(this.contentHash)}. You are running a different build.`,
         }),
       );
       return;
@@ -364,3 +395,8 @@ export class HostSession {
 }
 
 export { TICK_MS };
+
+/** Eight-digit hex, so two content hashes can be compared by eye in a message. */
+function hex(value: number): string {
+  return (value >>> 0).toString(16).padStart(8, "0");
+}

@@ -12,7 +12,8 @@
       "@rts/sim": ["../sim/src/index.ts"],
       "@rts/transport": ["../transport/src/index.ts"],
       "@rts/protocol": ["../protocol/src/index.ts"],
-      "@rts/netcode": ["../netcode/src/index.ts"]
+      "@rts/netcode": ["../netcode/src/index.ts"],
+      "@rts/content": ["../content/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts"],
@@ -20,6 +21,7 @@
     { "path": "../sim" },
     { "path": "../transport" },
     { "path": "../protocol" },
-    { "path": "../netcode" }
+    { "path": "../netcode" },
+    { "path": "../content" }
   ]
 }

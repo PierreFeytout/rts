@@ -3,7 +3,7 @@ import { entityIndex } from "./entities.js";
 import { enableDevChecks } from "./fixed.js";
 import { buildScenarioWorld, runDeterminismScenario, scenarioCommands } from "./scenario.js";
 import { START_ALLOY } from "./players.js";
-import { T_PYLON, T_TROOPER } from "./types.js";
+import { FX_DEPOT, FX_SOLDIER } from "./fixture-types.js";
 
 beforeAll(() => {
   enableDevChecks(true);
@@ -32,17 +32,17 @@ describe("determinism scenario", () => {
 
   it("actually runs every system it claims to cover", () => {
     const { world, actors } = buildScenarioWorld(64);
-    const startingUnits = actors.units.length;
+    const startingUnits = actors.armies[0].length + actors.armies[1].length;
 
     for (let t = 0; t < 600; t++) world.step(scenarioCommands(actors, t, 64));
 
     const e = world.entities;
     let survivors = 0;
-    let pylonFinished = false;
+    let depotFinished = false;
     for (let i = 0; i < e.highWater; i++) {
       if (e.alive[i] !== 1) continue;
-      if (e.typeId[i] === T_TROOPER) survivors++;
-      if (e.typeId[i] === T_PYLON && e.buildRemaining[i] === 0) pylonFinished = true;
+      if (e.typeId[i] === FX_SOLDIER) survivors++;
+      if (e.typeId[i] === FX_DEPOT && e.buildRemaining[i] === 0) depotFinished = true;
     }
 
     // Combat resolved: units died, and not all of them.
@@ -52,7 +52,7 @@ describe("determinism scenario", () => {
     expect(world.players.alloy[0]).not.toBe(START_ALLOY);
     // Construction completed, which also means the grid mutated mid-run and the
     // flow-field cache was invalidated under load.
-    expect(pylonFinished).toBe(true);
+    expect(depotFinished).toBe(true);
     // Production delivered.
     expect(e.queueLen[entityIndex(actors.nexus)]).toBe(0);
   });

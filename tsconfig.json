@@ -5,6 +5,9 @@
       "path": "./packages/sim"
     },
     {
+      "path": "./packages/content"
+    },
+    {
       "path": "./packages/transport"
     },
     {

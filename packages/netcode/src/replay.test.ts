@@ -1,4 +1,6 @@
 import {
+  FX_RUNNER,
+  fixtureTypes,
   CMD_MOVE,
   TILE_BLOCKED,
   World,
@@ -16,7 +18,7 @@ beforeAll(() => {
 });
 
 function buildMatch(seed = 909): { world: World; units: EntityId[] } {
-  const world = new World({ mapTiles: 48, seed });
+  const world = new World({ types: fixtureTypes, mapTiles: 48, seed });
   world.grid.fillRect(18, 10, 5, 22, TILE_BLOCKED);
   const units: EntityId[] = [];
   for (let i = 0; i < 40; i++) {
@@ -28,7 +30,7 @@ function buildMatch(seed = 909): { world: World; units: EntityId[] } {
         moveSpeed: fxFromFloat(0.18),
         turnRate: 3600,
         owner: i % 2,
-        typeId: 1,
+        typeId: FX_RUNNER,
         health: 100,
       }),
     );
@@ -69,7 +71,7 @@ describe("replay", () => {
     // and a replay that fails to reproduce means the simulation has a
     // non-determinism -- far easier to find here than from a friend's desync.
     const { replay, finalHash } = recordMatch();
-    const fresh = new World({ mapTiles: 48, seed: 1 });
+    const fresh = new World({ types: fixtureTypes, mapTiles: 48, seed: 1 });
     const result = playReplay(fresh, replay);
 
     expect(result.ok).toBe(true);
@@ -82,14 +84,14 @@ describe("replay", () => {
     // The replay world is built with a different seed and no obstacles. If
     // playback still matches, the initial snapshot really does carry all state.
     const { replay, finalHash } = recordMatch();
-    const differentWorld = new World({ mapTiles: 48, seed: 0x1234 });
+    const differentWorld = new World({ types: fixtureTypes, mapTiles: 48, seed: 0x1234 });
     expect(playReplay(differentWorld, replay).finalHash).toBe(finalHash);
   });
 
   it("is reproducible across repeated playback", () => {
     const { replay } = recordMatch();
-    const a = playReplay(new World({ mapTiles: 48, seed: 5 }), replay);
-    const b = playReplay(new World({ mapTiles: 48, seed: 9 }), replay);
+    const a = playReplay(new World({ types: fixtureTypes, mapTiles: 48, seed: 5 }), replay);
+    const b = playReplay(new World({ types: fixtureTypes, mapTiles: 48, seed: 9 }), replay);
     expect(a.finalHash).toBe(b.finalHash);
   });
 
@@ -104,7 +106,7 @@ describe("replay", () => {
       ),
     };
 
-    const result = playReplay(new World({ mapTiles: 48, seed: 3 }), corrupted);
+    const result = playReplay(new World({ types: fixtureTypes, mapTiles: 48, seed: 3 }), corrupted);
     expect(result.ok).toBe(false);
     expect(result.divergedAtTick).toBe(corrupted.checkpoints[1].tick);
   });
@@ -127,7 +129,7 @@ describe("replay", () => {
           : commands,
       ),
     };
-    expect(playReplay(new World({ mapTiles: 48, seed: 3 }), tampered).ok).toBe(false);
+    expect(playReplay(new World({ types: fixtureTypes, mapTiles: 48, seed: 3 }), tampered).ok).toBe(false);
   });
 
   it("records every tick, including empty ones", () => {

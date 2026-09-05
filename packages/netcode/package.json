@@ -12,5 +12,8 @@
     "@rts/protocol": "*",
     "@rts/sim": "*",
     "@rts/transport": "*"
+  },
+  "devDependencies": {
+    "@rts/content": "*"
   }
 }

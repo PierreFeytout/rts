@@ -1,0 +1,16 @@
+{
+  "name": "@rts/content",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "comment": "Race and unit definitions. Depends on sim only for the shapes it produces; the simulation never depends on this package, so the engine cannot become specialised to any one race.",
+  "dependencies": {
+    "@rts/sim": "*",
+    "zod": "^4.5.4"
+  }
+}

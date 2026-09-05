@@ -3,11 +3,11 @@
 A futuristic real-time strategy game. 2.5D isometric, peer-hosted multiplayer —
 the player who creates the game hosts it, with no dedicated server to deploy.
 
-**Status: M4 complete — it is now actually a game.** Gather alloy, tap
-geothermal vents for plasma, build a base, train an army, and destroy your
-opponent. Peer-hosted: one player creates the game, gets a six-character code,
-and everyone else joins over a direct WebRTC connection with no dedicated server
-anywhere.
+**Status: M5 complete — two playable races, and the second one cost no engine
+code.** Gather alloy, tap geothermal vents for plasma, build a base, train an
+army, and destroy your opponent. Peer-hosted: one player creates the game, gets
+a six-character code, and everyone else joins over a direct WebRTC connection
+with no dedicated server anywhere.
 
 Verified between two browser tabs playing a real match: the guest's harvesting,
 construction and production all executed in the host's authoritative world, and
@@ -28,10 +28,14 @@ the same address, type the code, and they are in. There is no waiting room —
 guests join a match already in progress, because the welcome snapshot makes late
 joining the natural case.
 
-**How to actually play:** drag a box over your drones, right-click an amber ore
-crystal to start mining, then click a drone and use the command card at the
-bottom to place a Supply Pylon and a Foundry. Select the Foundry to train
-Troopers, select the army, press `A`, and click the enemy base.
+**How to actually play:** pick a faction lineup, drag a box over your workers,
+right-click an amber ore crystal to start mining, then click a worker and use
+the command card at the bottom to place a supply building and a factory. Select
+the factory to train soldiers, select the army, press `A`, and click the enemy
+base.
+
+The default lineup is **mixed** — one race per slot — so a guest joining slot 1
+is playing the Verdant Concord without configuring anything.
 
 For development, with hot reload:
 
@@ -41,7 +45,7 @@ npm run dev                       # client on :5173, finds the broker automatica
 ```
 
 ```bash
-npm test           # 242 tests
+npm test           # 280 tests
 npm run typecheck
 npm run lint       # includes the determinism rules
 ```
@@ -68,6 +72,7 @@ mandatory.
 | Package | Role |
 |---|---|
 | `packages/sim` | Deterministic simulation. **Zero dependencies, no DOM, no Node APIs.** |
+| `packages/content` | Race definitions, zod schemas, id interning, content hashing |
 | `packages/transport` | `Transport` interface + in-memory virtual network. No DOM, no Node. |
 | `packages/protocol` | Wire messages and MessagePack codec |
 | `packages/netcode` | Host arbiter, guest session, replay. No DOM, no Node. |
@@ -77,18 +82,18 @@ mandatory.
 Inside `packages/sim`: `fixed` (Q16.16 math), `rng`, `clock` (tick pacing),
 `hash` (state hashing), `entities` (SoA store), `grid` (passability),
 `flowfield` (Dijkstra pathing), `spatial` (neighbour queries), `commands`,
-`types` (the content table), `players` (resources, supply, defeat), `combat`,
-`economy`, `production`, `events` (derived output for the renderer), `snapshot`
-(serialisation), `scenario` (determinism fixture), and `world` (`step()` is the
-only mutator).
+`types` (the *shape* of content, and the damage matrix), `players` (resources,
+supply, defeat), `combat`, `economy`, `production`, `events` (derived output for
+the renderer), `snapshot` (serialisation), `fixture-types` and `scenario` (the
+determinism fixture), and `world` (`step()` is the only mutator).
 
 Three packages deliberately avoid both DOM and Node types. That is what lets the
 identical arbiter run in the host's browser tab today and in a headless
 dedicated server later, with only the transport swapped.
 
-Planned: `content` (race definitions loaded from files and validated with zod).
-The shape it will load already exists as `sim/types.ts`, so M5 is a swap rather
-than a restructure.
+`sim` depends on nothing; `content` depends on `sim`. The arrow points one way
+on purpose — the engine cannot import a race, so it is structurally impossible
+for the simulation to become specialised to one.
 
 ## The one rule that matters
 
@@ -140,17 +145,23 @@ node scripts/determinism-trace.mjs        # prints a hash trace
 Then open the client and run `__rts.determinism()` in the browser console. The
 `finalHash` and every entry of `trace` must match exactly.
 
-The fixture is not a movement demo. Across 600 ticks it runs two armies into
-each other and resolves the fight, works a harvesting round trip, completes a
-construction site (which mutates the grid mid-run and invalidates the flow-field
-cache under load), and empties a production queue -- so every system that
-accumulates integer state over time is inside the comparison. `scenario.test.ts`
-asserts that it still does all of that, because a fixture that quietly decayed
-into a no-op would leave this check green while testing nothing.
+The fixture is not a movement demo. Across 600 ticks it marches two 60-unit
+armies into each other and resolves the engagement, works a harvesting round
+trip, completes a construction site (which mutates the grid mid-run and
+invalidates the flow-field cache under load), empties a production queue, and
+runs a plasma tap whose fractional remainder carries in integer state the whole
+way -- so every system that accumulates state over time is inside the
+comparison. `scenario.test.ts` asserts that it still does all of that, because a
+fixture that quietly decayed into a no-op would leave this check green while
+testing nothing.
+
+It runs on `fixtureTypes` rather than on shipped content, so a balance change
+never churns the trace.
 
 Current status: **Node v22.15 and Chrome 148 agree** on all 12 checkpoints and
-`finalHash d62ad87e`, across 600 ticks of pathfinding, crowd separation,
-trigonometry, division, the damage matrix, death, harvesting and construction.
+`finalHash 3f2b7306`, across 600 ticks of pathfinding, crowd separation,
+trigonometry, division, the damage matrix, death, harvesting, construction and
+the fractional plasma accumulator.
 
 Known gap: both are V8. That comparison does catch the "a new V8 changed
 `Math.sin`" class of bug, but **SpiderMonkey is untested** — running
@@ -235,17 +246,25 @@ HTTPS. `localhost` is exempt, which is why local testing works without it.
 
 ## The game
 
-Race #1 is the **Vanguard Directive** -- human corporate-military, all hovertanks
-and drones. Everything below lives in `packages/sim/src/types.ts` as *data*,
-reached through `World.types` rather than imported by the systems that use it.
-No system hardcodes a number; adding a race means adding rows.
+Two races ship. **The Vanguard Directive** is human corporate-military —
+hovertanks, mechs and drones, kinetic lines and explosive armour. **The Verdant
+Concord** is grown rather than built: near-melee Thornlings that want to close,
+long-range Sporecasters that fold if anything reaches them, and workers that
+carry larger loads more slowly.
+
+Everything about both of them lives in `packages/content` as *data*, reached
+through `World.types` rather than imported by the systems that use it. No system
+hardcodes a number, and the simulation cannot import a race even by accident —
+see "Adding a race" below.
 
 **Two resources, with deliberately different acquisition loops.** *Alloy* is a
-round trip -- a Drone walks to an ore patch, mines for a second, and walks the
-load back to a drop-off. *Plasma* is a passive trickle from an Extractor built
-on a geothermal vent. Two genuinely different loops rather than the same loop in
-a different colour, which is what stops the content system from being
-accidentally specialised to one shape of economy.
+round trip — a worker walks to an ore patch, mines for a second, and walks the
+load back to a drop-off. *Plasma* is a passive trickle from a structure built on
+a geothermal vent. Two genuinely different loops rather than the same loop in a
+different colour, which is what stops the content system from being accidentally
+specialised to one shape of economy.
+
+### The Vanguard Directive
 
 | Unit | Cost | Role |
 |---|---|---|
@@ -261,6 +280,27 @@ accidentally specialised to one shape of economy.
 | Foundry | 200a | Trains combat units. |
 | Supply Pylon | 80a | +8 supply. |
 | Turret | 120a 25p | Static plasma defence. |
+
+### The Verdant Concord
+
+| Unit | Cost | Role |
+|---|---|---|
+| Sporeling | 55a | Harvests and builds. Bigger loads, slower to fill. |
+| Thornling | 65a | Near-melee brawler. Enormous damage if it survives the walk in. |
+| Sporecaster | 70a 20p | Out-ranges everything the Vanguard fields, and dies to anything that closes. |
+| Behemoth | 140a 50p | Heavy explosive armour. |
+
+| Building | Cost | Role |
+|---|---|---|
+| Heartwood | 400a | HQ. +12 supply, where the Nexus gives 10. |
+| Siphon | 110a | On a vent. 4 plasma/second, where the Extractor gives 3. |
+| Grove | 200a | Trains combat units. |
+| Bloom | 70a | +7 supply, where the Pylon gives 8. |
+| Barb | 115a 25p | Static kinetic defence. |
+
+The Concord opens with more supply and expands its cap more slowly, wants to
+fight at close range, and ramps its economy later. None of that is a special
+case in the engine; it is entirely the numbers.
 
 **Damage is a matrix, not a list of "strong against" tags.** Three damage types
 against three armour classes, as integer percentages:
@@ -282,6 +322,68 @@ You lose when you own nothing at all -- not "no buildings", which produces the
 classic stalemate where a defeated player's last drone hides in a corner
 forever. The last player standing wins; a mutual kill stays undecided rather
 than crowning whoever died last.
+
+## Adding a race
+
+The extensibility requirement was never "make it possible" — everything is
+possible. It was that adding a race should be **cheap**, meaning it touches
+content and nothing else. The Verdant Concord is the proof: it is one file,
+`packages/content/src/races/concord.ts`, plus one entry in an array.
+`concord.test.ts` checks the claim rather than asserting it, and would fail if a
+future race needed engine work.
+
+### How it fits together
+
+Content is authored in units a designer can reason about — **tiles and
+seconds**, never Q16.16 and ticks. The loader does four things:
+
+1. **Validates** against a zod schema. Content is the part of the system meant
+   to be edited by people who are not reading the engine source, so a strict
+   schema at the boundary is worth more than it costs: a typo becomes a message
+   naming the field, not a unit that quietly has zero health. The schema is
+   `.strict()`, so a misspelled key is an error rather than a silently ignored
+   one.
+2. **Interns** string ids into dense integers, by *sorting the ids*. The
+   simulation indexes a flat table every tick and stores the id in an
+   `Int32Array`; the sort is what makes the numbering reproducible, so two peers
+   that loaded the same content agree without exchanging anything. Definition
+   order is an authoring accident and must not be able to matter.
+3. **Converts** units: 2.6 tiles/second becomes Q16.16 per tick, 1.2 seconds
+   becomes 24 ticks. Durations are clamped to a minimum of one tick — rounding a
+   0.04-second cooldown down to zero would make a weapon fire every tick
+   forever.
+4. **Checks coherence.** zod proves each field is well-formed; it cannot prove
+   that a Foundry produces something that exists, or that a race has any way to
+   deliver alloy. Those checks live in the loader, because the failure mode is
+   otherwise a race that loads cleanly and is unplayable.
+
+### The behaviour registry
+
+The engine implements a closed set of behaviours — `attack`, `gather`, `build`,
+`produce`, `dropoff`, `needsVent` — and content picks from it by name. That is
+deliberately not a plugin system: an ability no system reads would do nothing at
+all and would look like a balance problem rather than a typo. A genuinely novel
+mechanic means a new flag plus one system in `sim`, reusable by every race after
+it — and at that point the "zero engine code" claim has to be re-earned rather
+than assumed.
+
+### The content hash
+
+`defaultContent.hash` fingerprints the *resolved* content — the converted
+numbers the simulation actually runs on, plus the string ids. Reformatting a
+definition does not change it; changing a stat by one does. The lobby exchanges
+it in the handshake and the host refuses a mismatch by name:
+
+```
+content mismatch: yours is 4b1f0a37, the host's is dfada7b3.
+You are running a different build.
+```
+
+Without that check, two peers whose content differs by one number diverge on the
+first purchase, and the desync report points at the simulation — which sends you
+looking in exactly the wrong place. Blurbs and other presentation text are
+excluded: refusing a friend's connection over a marketing sentence would be
+absurd.
 
 ### Shots are hitscan, tracers are cosmetic
 
@@ -403,6 +505,35 @@ Learned while building this, recorded so they are not re-learned:
 - **Renderer hooks must fire per *tick*, not per frame.** A renderer that
   sampled `world.events` after `session.update()` would see only the last tick
   of a catch-up burst -- which is precisely when the most is happening.
+- **Engine tests must not run on shipped content.** Assertions like "the depot
+  cost 100 alloy" break on every balance change, which teaches people to update
+  them reflexively -- and a reflexively updated assertion is not a test. Engine
+  tests run against `sim/fixture-types.ts`, a deliberately different eight-entry
+  table; that they pass at all is a standing demonstration that nothing in the
+  simulation is specialised to one race.
+- **The determinism fixture owns its content too.** Its hashes are compared
+  between runtimes by eye at the same commit. Tying them to shipped balance
+  churns the trace on every tuning pass, and churn in a number people compare by
+  eye is how a genuine divergence gets waved through.
+- **A fixture that includes a shooting unit becomes a combat test.** Giving two
+  owners the same armed type turned the movement and replay fixtures into
+  battles that killed their own subjects halfway through -- one replay-tampering
+  test started passing for the wrong reason, because the entity it tampered with
+  was already dead. Those fixtures now use an explicitly unarmed unit.
+- **Type id 0 is reserved.** A cleared entity slot reads back as type 0, so a
+  real type there makes a dead slot look like a live entity. Interning starts at
+  1 and `TypeTable` rejects anything lower.
+- **Content ids are interned by sorting, not by definition order.** Definition
+  order is an authoring accident; two peers whose content files were
+  concatenated differently would otherwise disagree about which integer means
+  "drone" -- while both reporting perfectly healthy content.
+- **A weapon with no `attack` behaviour is a content bug, not a quirk.** The
+  unit stands there being shot, which reads as a combat bug. The loader rejects
+  it, and rejects the mirror case too. That check was missing for buildings
+  until a test written to fail found that it was.
+- **Coherence checks belong at load, not at first use.** A race with no drop-off
+  loads perfectly and then mines alloy it can never bank: the workers walk home
+  forever and the player watches an economy that produces nothing.
 
 ## Debug tooling
 
@@ -427,6 +558,6 @@ tooling captures nothing there, while a WebGL readback still works.
 - **M2** — Netcode: protocol, transport interface, host arbiter, desync detection, replays ✅
 - **M3** — WebRTC + lobby: signaling broker, join codes, connection diagnostics ✅
 - **M4** — Gameplay: harvesting, construction, production, combat, victory ✅
-- **M5** — Content system: zod-validated race definitions, behavior registry, stub race #2
+- **M5** — Content system: zod-validated race definitions, behaviour registry, race #2 ✅
 - **M6** — Presentation: fog of war, minimap, control groups, command UI, art pass
 - **M7** — Ship: broker deployment, reconnect, replay playback

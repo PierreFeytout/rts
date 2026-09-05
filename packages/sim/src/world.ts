@@ -65,7 +65,6 @@ import {
   KIND_BUILDING,
   KIND_RESOURCE,
   NEEDS_VENT,
-  defaultTypes,
 } from "./types.js";
 
 /**
@@ -110,13 +109,16 @@ export interface WorldOptions {
   mapTiles: number;
   seed: number;
   /**
-   * Content set. Defaults to race #1.
+   * Content set: every unit, building and resource this world can contain.
    *
-   * Injected rather than imported by the systems so that M5 can load content
-   * from files without touching a single line of simulation code -- and so a
-   * test can define three toy unit types instead of reasoning about balance.
+   * Required rather than defaulted. A default would have to live in this
+   * package, which would put race data back inside the engine -- and a world
+   * silently constructed with the wrong content is a desync that presents as
+   * "the guest sees different units", which is a miserable thing to debug.
+   * `@rts/content` supplies the shipped races; `fixtureTypes` supplies a
+   * minimal set for engine tests.
    */
-  types?: TypeTable;
+  types: TypeTable;
 }
 
 export class World {
@@ -157,7 +159,7 @@ export class World {
     // enough that each cell holds a handful of units rather than a crowd.
     this.spatial = new SpatialHash(options.mapTiles, 2, MAX_ENTITIES);
     this.rng = new Rng(options.seed);
-    this.types = options.types ?? defaultTypes;
+    this.types = options.types;
 
     // Derived from content rather than hardcoded. A neighbour query must cover
     // the largest thing that could be overlapping the querier, and a constant

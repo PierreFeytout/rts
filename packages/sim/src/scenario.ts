@@ -9,9 +9,18 @@ import {
 } from "./commands.js";
 import { spawnTyped, type EntityId } from "./entities.js";
 import { fxFromFloat } from "./fixed.js";
+import {
+  FX_DEPOT,
+  FX_HQ,
+  FX_ORE,
+  FX_SOLDIER,
+  FX_TAP,
+  FX_VENT,
+  FX_WORKER,
+  fixtureTypes,
+} from "./fixture-types.js";
 import { TILE_BLOCKED } from "./grid.js";
 import { recomputeSupplyAndDefeat } from "./production.js";
-import { T_ALLOY_NODE, T_DRONE, T_NEXUS, T_PYLON, T_TROOPER } from "./types.js";
 import { World } from "./world.js";
 
 /**
@@ -27,9 +36,13 @@ import { World } from "./world.js";
  * The scenario deliberately exercises the parts most likely to differ:
  * trigonometry (unit facing), square roots (distance), division (steering
  * normalisation), pathfinding around obstacles, dense crowd separation where
- * tiny differences amplify fastest, and -- since M4 -- the gameplay systems
- * that accumulate integer state over hundreds of ticks: the damage matrix and
- * death, harvesting round trips, construction, and production queues.
+ * tiny differences amplify fastest, and the gameplay systems that accumulate
+ * integer state over hundreds of ticks: the damage matrix and death, harvesting
+ * round trips, construction, and production queues.
+ *
+ * It runs on `fixtureTypes`, not on shipped content. Tying the trace to real
+ * balance would churn it on every tuning pass, and churn in a number people are
+ * meant to compare by eye is how a genuine divergence gets waved through.
  *
  * Any change to simulation behaviour changes these hashes. That is intended --
  * the numbers are compared between runtimes at the same commit, never against
@@ -53,8 +66,14 @@ export interface ScenarioOptions {
 
 /** Handles the command script needs to address. */
 export interface ScenarioActors {
-  /** Combat units, alternating owner by index. */
-  units: EntityId[];
+  /**
+   * One army per player, kept as separate lists rather than filtered out of a
+   * single one by index parity. A spawn that lands on an obstacle is skipped,
+   * so parity drifts away from ownership -- and the resulting orders are
+   * silently dropped by the ownership check, leaving half the fixture inert
+   * while still looking busy.
+   */
+  armies: EntityId[][];
   /** Harvesters belonging to player 0. */
   drones: EntityId[];
   /** Player 0's headquarters. */
@@ -68,21 +87,28 @@ export function buildScenarioWorld(
   mapTiles = 64,
   seed = 0x5ca1ab1e,
 ): { world: World; actors: ScenarioActors } {
-  const world = new World({ mapTiles, seed });
+  const world = new World({ mapTiles, seed, types: fixtureTypes });
 
   // Obstacles from the seeded rng, so the layout is part of the fixture rather
-  // than hardcoded geometry.
+  // than hardcoded geometry. Kept clear of both spawn areas, so all 120 units
+  // exist on every run -- a fixture whose unit count depends on a dice roll is
+  // a fixture whose trace is harder to reason about than it needs to be.
   for (let i = 0; i < 12; i++) {
     const w = world.rng.nextRange(2, 6);
     const h = world.rng.nextRange(2, 6);
-    const x = world.rng.nextRange(8, mapTiles - 8 - w);
-    const y = world.rng.nextRange(8, mapTiles - 8 - h);
+    const x = world.rng.nextRange(14, mapTiles - 20 - w);
+    const y = world.rng.nextRange(14, mapTiles - 20 - h);
     world.grid.fillRect(x, y, w, h, TILE_BLOCKED);
   }
 
   // An economy for player 0, in the far corner from where the fighting starts.
-  const nexus = world.placeStructure(T_NEXUS, mapTiles - 14, mapTiles - 14, 0);
-  const node = world.placeStructure(T_ALLOY_NODE, mapTiles - 7, mapTiles - 14, -1);
+  const nexus = world.placeStructure(FX_HQ, mapTiles - 14, mapTiles - 14, 0);
+  const node = world.placeStructure(FX_ORE, mapTiles - 7, mapTiles - 14, -1);
+  // A vent with a working tap on it, so the plasma accumulator -- which carries
+  // a fractional remainder in integer state across every tick of the run -- is
+  // inside the comparison too.
+  world.placeStructure(FX_VENT, mapTiles - 20, mapTiles - 7, -1);
+  world.placeStructure(FX_TAP, mapTiles - 16, mapTiles - 7, 0);
 
   const drones: EntityId[] = [];
   for (let i = 0; i < 6; i++) {
@@ -90,7 +116,7 @@ export function buildScenarioWorld(
       spawnTyped(
         world.entities,
         world.types,
-        T_DRONE,
+        FX_WORKER,
         fxFromFloat(mapTiles - 9 + (i % 3) * 0.7),
         fxFromFloat(mapTiles - 10 + Math.floor(i / 3) * 0.7),
         0,
@@ -98,27 +124,27 @@ export function buildScenarioWorld(
     );
   }
 
-  // Two armies of Troopers. Alternating ownership by index means the crowd is
-  // interleaved rather than segregated, so the moment they are sent to the same
-  // point they are already in contact -- which is where any arithmetic
-  // difference amplifies fastest, and now where the damage matrix is exercised
-  // hardest as well.
-  const units: EntityId[] = [];
-  for (let i = 0; i < 120; i++) {
-    const player = i % 2;
-    const x = 4 + (i % 10) * 0.7 + player * 2;
-    const y = 4 + Math.floor(i / 10) * 0.7;
-    if (world.grid.isBlocked(Math.floor(x), Math.floor(y))) continue;
-    units.push(
-      spawnTyped(world.entities, world.types, T_TROOPER, fxFromFloat(x), fxFromFloat(y), player),
-    );
+  // Two armies of 60, in separate blocks far enough apart that neither can see
+  // the other at spawn. They are marched into each other later, so the fixture
+  // covers an actual engagement -- formations closing, firing, losing units and
+  // reforming -- rather than a mutual annihilation that is over in a hundred
+  // ticks and leaves the rest of the run nearly static.
+  const armies: EntityId[][] = [[], []];
+  for (let player = 0; player < 2; player++) {
+    for (let n = 0; n < 60; n++) {
+      const x = 4 + (n % 8) * 0.75;
+      const y = 4 + Math.floor(n / 8) * 0.75 + player * 16;
+      armies[player].push(
+        spawnTyped(world.entities, world.types, FX_SOLDIER, fxFromFloat(x), fxFromFloat(y), player),
+      );
+    }
   }
 
   world.players.inPlay[0] = 1;
   world.players.inPlay[1] = 1;
   recomputeSupplyAndDefeat(world);
 
-  return { world, actors: { units, drones, nexus, node } };
+  return { world, actors: { armies, drones, nexus, node } };
 }
 
 /** The scripted command stream. Pure function of tick. */
@@ -127,7 +153,7 @@ export function scenarioCommands(
   tick: number,
   mapTiles: number,
 ): Command[] {
-  const of = (player: number): EntityId[] => actors.units.filter((_, i) => i % 2 === player);
+  const of = (player: number): EntityId[] => actors.armies[player];
   const move = (player: number, x: number, y: number): Command => ({
     kind: CMD_MOVE,
     playerId: player,
@@ -140,7 +166,7 @@ export function scenarioCommands(
     case 1:
       return [
         { kind: CMD_GATHER, playerId: 0, entities: actors.drones, target: actors.node },
-        { kind: CMD_TRAIN, playerId: 0, building: actors.nexus, unitType: T_DRONE },
+        { kind: CMD_TRAIN, playerId: 0, building: actors.nexus, unitType: FX_WORKER },
       ];
     case 2:
       return [move(0, mapTiles - 8, mapTiles - 8)];
@@ -154,7 +180,7 @@ export function scenarioCommands(
           kind: CMD_BUILD,
           playerId: 0,
           entities: [actors.drones[0]],
-          buildingType: T_PYLON,
+          buildingType: FX_DEPOT,
           tileX: mapTiles - 18,
           tileY: mapTiles - 12,
         },

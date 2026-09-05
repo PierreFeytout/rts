@@ -1,4 +1,6 @@
 import {
+  FX_RUNNER,
+  fixtureTypes,
   CMD_MOVE,
   CMD_STOP,
   TICK_MS,
@@ -22,7 +24,7 @@ beforeAll(() => {
 const MAP_TILES = 48;
 
 function buildWorld(seed = 4242): World {
-  return new World({ mapTiles: MAP_TILES, seed });
+  return new World({ mapTiles: MAP_TILES, seed, types: fixtureTypes });
 }
 
 function populate(world: World, playerCount: number): EntityId[][] {
@@ -38,7 +40,7 @@ function populate(world: World, playerCount: number): EntityId[][] {
           moveSpeed: fxFromFloat(0.18),
           turnRate: 3600,
           owner: p,
-          typeId: 1,
+          typeId: FX_RUNNER,
           health: 100,
         }),
       );

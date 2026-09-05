@@ -11,6 +11,7 @@ export default defineConfig({
         new URL("./packages/transport/src/index.ts", import.meta.url),
       ),
       "@rts/protocol": fileURLToPath(new URL("./packages/protocol/src/index.ts", import.meta.url)),
+      "@rts/content": fileURLToPath(new URL("./packages/content/src/index.ts", import.meta.url)),
       "@rts/netcode": fileURLToPath(new URL("./packages/netcode/src/index.ts", import.meta.url)),
     },
   },

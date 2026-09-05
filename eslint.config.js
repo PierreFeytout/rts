@@ -36,11 +36,16 @@ export default tseslint.config(
   },
 
   // -------------------------------------------------------------------------
-  // Determinism enforcement -- simulation source only.
+  // Determinism enforcement -- simulation source, and the content that feeds it.
+  //
+  // Content is included because its *output* is simulation input: a stat
+  // derived from Math.random or the current date would desync a match just as
+  // surely as one computed inside the sim. Content loading must be a pure
+  // function of its definitions.
   // -------------------------------------------------------------------------
   {
-    files: ["packages/sim/src/**/*.ts"],
-    ignores: ["packages/sim/src/**/*.test.ts"],
+    files: ["packages/sim/src/**/*.ts", "packages/content/src/**/*.ts"],
+    ignores: ["packages/sim/src/**/*.test.ts", "packages/content/src/**/*.test.ts"],
     rules: {
       "no-restricted-globals": [
         "error",

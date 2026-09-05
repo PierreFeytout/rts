@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@rts/content": "*",
     "@rts/netcode": "*",
     "@rts/protocol": "*",
     "@rts/sim": "*",

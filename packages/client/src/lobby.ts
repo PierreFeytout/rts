@@ -1,7 +1,8 @@
+import { defaultContent } from "@rts/content";
 import { GuestSession, HostSession } from "@rts/netcode";
 import type { World } from "@rts/sim";
 import { SignalingClient, VirtualNetwork, WebRtcTransport, type PeerDiagnostic } from "@rts/transport";
-import { createEmptyWorld, createMatchWorld } from "./match.js";
+import { RACE_IDS, createEmptyWorld, createMatchWorld, type FactionMode } from "./match.js";
 
 /**
  * Pre-match lobby: choose to play solo, host a game, or join one by code.
@@ -48,6 +49,19 @@ export function showLobby(): Promise<LobbyResult> {
     document.body.appendChild(root);
 
     const panel = root.querySelector<HTMLDivElement>("#lobby-panel")!;
+    const factions = root.querySelector<HTMLSelectElement>("#factions")!;
+
+    // Populated from the loaded content rather than hardcoded, so a new race
+    // appears in the picker the moment its definition exists.
+    for (const raceId of RACE_IDS) {
+      const race = defaultContent.race(raceId);
+      const option = document.createElement("option");
+      option.value = raceId;
+      option.textContent = `all ${race.name}`;
+      option.title = race.blurb;
+      factions.appendChild(option);
+    }
+    const chosenFactions = (): FactionMode => factions.value as FactionMode;
     const status = root.querySelector<HTMLDivElement>("#lobby-status")!;
     const diagnostics = root.querySelector<HTMLPreElement>("#lobby-diagnostics")!;
 
@@ -79,11 +93,15 @@ export function showLobby(): Promise<LobbyResult> {
     // --- solo ---------------------------------------------------------------
 
     root.querySelector<HTMLButtonElement>("#btn-solo")!.onclick = () => {
-      const world = createMatchWorld(0xc0ffee);
+      const world = createMatchWorld(0xc0ffee, chosenFactions());
       // A one-peer virtual network, so solo play still runs the full lockstep
       // path rather than a special-cased direct-apply shortcut.
       const network = new VirtualNetwork();
-      const session = new HostSession({ world, transport: network.addPeer(0) });
+      const session = new HostSession({
+        world,
+        transport: network.addPeer(0),
+        contentHash: defaultContent.hash,
+      });
       finish({ world, session, localPlayer: 0, isHost: true });
     };
 
@@ -93,7 +111,7 @@ export function showLobby(): Promise<LobbyResult> {
       panel.classList.add("busy");
       say("contacting the lobby server...");
 
-      const world = createMatchWorld((Math.random() * 0x7fffffff) | 0);
+      const world = createMatchWorld((Math.random() * 0x7fffffff) | 0, chosenFactions());
       let transport: WebRtcTransport | null = null;
       let session: HostSession | null = null;
 
@@ -106,7 +124,7 @@ export function showLobby(): Promise<LobbyResult> {
             isHost: true,
             onDiagnostic: () => showDiagnostics(transport?.diagnostics ?? []),
           });
-          session = new HostSession({ world, transport });
+          session = new HostSession({ world, transport, contentHash: defaultContent.hash });
           finish({ world, session, localPlayer: 0, isHost: true, joinCode: code, signaling });
         },
         onPeerJoined: (peerId) => transport?.connectTo(peerId),
@@ -156,6 +174,7 @@ export function showLobby(): Promise<LobbyResult> {
             world,
             transport,
             name: `player ${peerId}`,
+            contentHash: defaultContent.hash,
             onWelcome: (playerId) => {
               finish({
                 world,
@@ -264,6 +283,13 @@ const LOBBY_HTML = `
     font: inherit; text-transform: uppercase; letter-spacing: 0.22em;
   }
   #lobby .row button { width: auto; padding-inline: 20px; }
+  #lobby .field { display: block; margin-bottom: 14px; }
+  #lobby .field span { display: block; margin-bottom: 5px; color: #62809f; font-size: 11px; }
+  #lobby select {
+    width: 100%; padding: 10px 12px;
+    border: 1px solid #2f6f8f; border-radius: 6px;
+    background: #0c1520; color: #cfe4ff; font: inherit; cursor: pointer;
+  }
   #lobby hr { border: none; border-top: 1px solid #1d2c3d; margin: 20px 0; }
   #lobby-status { min-height: 20px; margin-top: 14px; font-size: 12px; color: #8fe3ff; }
   #lobby-diagnostics {
@@ -274,6 +300,13 @@ const LOBBY_HTML = `
 <div id="lobby-panel">
   <h1>RTS</h1>
   <p class="sub">peer-to-peer · deterministic lockstep</p>
+
+  <label class="field">
+    <span>factions</span>
+    <select id="factions">
+      <option value="mixed">mixed — one race per slot</option>
+    </select>
+  </label>
 
   <button id="btn-solo">Play solo</button>
   <button id="btn-host">Host a game</button>

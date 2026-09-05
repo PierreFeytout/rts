@@ -5,6 +5,7 @@ export * from "./economy.js";
 export * from "./entities.js";
 export * from "./events.js";
 export * from "./fixed.js";
+export * from "./fixture-types.js";
 export * from "./flowfield.js";
 export * from "./grid.js";
 export * from "./hash.js";

@@ -1,14 +1,9 @@
+import { defaultContent, buildContent, vanguard, mapResources } from "@rts/content";
 import {
   CMD_ATTACK_MOVE,
   CMD_BUILD,
   CMD_GATHER,
   CMD_TRAIN,
-  T_ALLOY_NODE,
-  T_DRONE,
-  T_FOUNDRY,
-  T_NEXUS,
-  T_PYLON,
-  T_TROOPER,
   TICK_MS,
   World,
   enableDevChecks,
@@ -36,7 +31,19 @@ import { HostSession } from "./host.js";
  * It runs in milliseconds and needs no browser, which is the entire reason
  * `transport` is its own package: the whole lockstep layer is CI-testable
  * without any real networking.
+ *
+ * Unlike the engine tests, this one runs against the SHIPPED content: it is the
+ * closest thing to "does the actual game work over an actual connection", and
+ * running it against a toy race would leave that question unanswered.
  */
+
+const content = defaultContent;
+const T_ALLOY_NODE = content.id("map.alloy-node");
+const T_DRONE = content.id("vanguard.drone");
+const T_FOUNDRY = content.id("vanguard.foundry");
+const T_NEXUS = content.id("vanguard.nexus");
+const T_PYLON = content.id("vanguard.pylon");
+const T_TROOPER = content.id("vanguard.trooper");
 
 beforeAll(() => {
   enableDevChecks(true);
@@ -52,7 +59,7 @@ const BASES: Array<[number, number]> = [
 
 /** Two facing bases with ore, close enough that the armies actually meet. */
 function buildMatchWorld(seed: number): World {
-  const world = new World({ mapTiles: MAP_TILES, seed });
+  const world = new World({ mapTiles: MAP_TILES, seed, types: content.types });
 
   BASES.forEach(([bx, by], player) => {
     world.placeStructure(T_NEXUS, bx, by, player);
@@ -78,11 +85,24 @@ function buildMatchWorld(seed: number): World {
 interface Harness {
   host: HostSession;
   guest: GuestSession;
+  /** Why the host refused, if it did. */
+  rejection(): string;
   tick(count: number): void;
   drain(): void;
 }
 
-function makeHarness(latencyMs = 45, jitterMs = 12): Harness {
+interface HarnessOptions {
+  latencyMs?: number;
+  jitterMs?: number;
+  /** Content hash the host advertises. Defaults to the shipped set. */
+  hostContent?: number;
+  /** Content hash the guest claims. Defaults to the shipped set. */
+  guestContent?: number;
+}
+
+function makeHarness(options: HarnessOptions = {}): Harness {
+  const latencyMs = options.latencyMs ?? 45;
+  const jitterMs = options.jitterMs ?? 12;
   const net = new VirtualNetwork(0x5111);
   const hostTransport = net.addPeer(0);
   const guestTransport = net.addPeer(1);
@@ -93,13 +113,19 @@ function makeHarness(latencyMs = 45, jitterMs = 12): Harness {
     transport: hostTransport,
     inputDelay: 4,
     hashInterval: 20,
+    contentHash: options.hostContent ?? content.hash,
   });
   // The guest starts from an EMPTY world; everything arrives in the snapshot.
+  let rejection = "";
   const guest = new GuestSession({
-    world: new World({ mapTiles: MAP_TILES, seed: 1 }),
+    world: new World({ mapTiles: MAP_TILES, seed: 1, types: content.types }),
     transport: guestTransport,
     hashInterval: 20,
     name: "guest",
+    contentHash: options.guestContent ?? content.hash,
+    onReject: (reason) => {
+      rejection = reason;
+    },
   });
   guest.connect();
   net.advance(latencyMs * 3 + jitterMs + 10);
@@ -107,6 +133,7 @@ function makeHarness(latencyMs = 45, jitterMs = 12): Harness {
   return {
     host,
     guest,
+    rejection: () => rejection,
     tick(count: number) {
       for (let i = 0; i < count; i++) {
         host.update(TICK_MS);
@@ -273,7 +300,7 @@ describe("a full match over the network", () => {
   });
 
   it("agrees on a resource node running dry", () => {
-    const h = makeHarness(20, 0);
+    const h = makeHarness({ latencyMs: 20, jitterMs: 0 });
     const hostWorld = h.host.world;
     const node = find(hostWorld, T_ALLOY_NODE, -1)[0];
     // Nearly exhausted, so it depletes and despawns mid-match on both peers.
@@ -299,7 +326,7 @@ describe("a full match over the network", () => {
   });
 
   it("refuses a guest's order against another player's units", () => {
-    const h = makeHarness(20, 0);
+    const h = makeHarness({ latencyMs: 20, jitterMs: 0 });
     const hostWorld = h.host.world;
     const victim = find(hostWorld, T_DRONE, 0)[0];
     const nexus = find(hostWorld, T_NEXUS, 0)[0];
@@ -321,5 +348,40 @@ describe("a full match over the network", () => {
     expect(hostWorld.players.alloy[0]).toBe(before);
     expect(hostWorld.entities.alive[entityIndex(hostWorld.entities.idAt(victim))]).toBe(1);
     expect(h.guest.world.hash()).toBe(hostWorld.hash());
+  });
+});
+
+describe("the content handshake", () => {
+  it("lets a peer with matching content in", () => {
+    const h = makeHarness();
+    expect(h.guest.isJoined).toBe(true);
+    expect(h.rejection()).toBe("");
+  });
+
+  it("refuses a peer whose content differs, and says so", () => {
+    // Two peers running the same code but disagreeing about how much a unit
+    // costs diverge on the first purchase. Without this check the symptom is a
+    // desync report pointing at the simulation, which sends you looking in
+    // exactly the wrong place.
+    const tweaked = JSON.parse(JSON.stringify(vanguard)) as typeof vanguard;
+    tweaked.units[1].maxHealth += 1;
+    const otherHash = buildContent([tweaked], mapResources).hash;
+
+    const h = makeHarness({ guestContent: otherHash });
+
+    expect(h.guest.isJoined).toBe(false);
+    expect(h.rejection()).toContain("content mismatch");
+    // Both hashes appear, so the two players can compare builds without
+    // needing anyone to explain what a content hash is.
+    expect(h.rejection()).toContain(otherHash.toString(16));
+    expect(h.rejection()).toContain(content.hash.toString(16));
+  });
+
+  it("skips the check when the host advertises no content", () => {
+    // Engine tests and the determinism fixture build worlds from a fixture
+    // table and have no content set at all; a mandatory check would make them
+    // impossible to write.
+    const h = makeHarness({ hostContent: 0, guestContent: 0xdeadbeef });
+    expect(h.guest.isJoined).toBe(true);
   });
 });

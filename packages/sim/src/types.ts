@@ -1,14 +1,18 @@
-import { fxFromFloat, type Fx } from "./fixed.js";
+import type { Fx } from "./fixed.js";
 
 /**
- * Entity type definitions -- what a Drone is, what a Foundry costs.
+ * The *shape* of entity type definitions -- what questions the simulation is
+ * allowed to ask about a unit.
  *
- * This is deliberately *data* rather than code, and it is reached through
- * `World.types` rather than imported directly by the systems that use it. The
- * simulation only ever asks the table questions ("how much damage does type 3
- * do?"); it never hardcodes an answer. That is the whole extensibility
- * requirement in one sentence: adding a race means adding rows here, and later
- * loading those rows from content files, without any system below caring.
+ * Deliberately contains no actual units. The Vanguard Directive, and every race
+ * after it, lives in `@rts/content`; this package never imports that one. The
+ * dependency points one way on purpose: content knows about the engine, the
+ * engine knows nothing about content, so it is structurally impossible for the
+ * simulation to become specialised to a particular race.
+ *
+ * The simulation only ever asks the table questions ("how much damage does type
+ * 3 do?"); it never hardcodes an answer. That is the whole extensibility
+ * requirement in one sentence.
  *
  * Everything is integer or fixed-point. Costs, damage and durations are plain
  * integers; distances and speeds are Q16.16. Nothing here may be a float at
@@ -53,6 +57,11 @@ export const DAMAGE_COUNT = 3;
  * every engine, whereas a Q16.16 multiply would introduce rounding that has to
  * be reasoned about every time someone rebalances a number.
  *
+ * This matrix is engine-level rather than content-level. Races pick from the
+ * existing damage types; a race that could invent its own multipliers could
+ * quietly make itself immune to everything, and cross-race balance would stop
+ * being a property anyone could reason about.
+ *
  *              vs LIGHT   vs HEAVY   vs STRUCTURE
  *   KINETIC       100         65          70
  *   PLASMA         85        135          60
@@ -78,10 +87,11 @@ export function applyDamageTable(base: number, damageType: number, armour: numbe
 /**
  * What an entity can *do*, as a bitmask.
  *
- * These are the hooks the engine knows about. A content file picks from this
- * set; anything genuinely new becomes a new flag plus one system, reusable by
- * every race thereafter. This is the "engine knows behaviours, content knows
- * everything else" split the plan calls for, in its simplest useful form.
+ * These are the behaviours the engine implements. Content picks from this set
+ * by name -- see the behaviour registry in `@rts/content` -- and a genuinely
+ * novel mechanic becomes a new flag plus one system here, reusable by every
+ * race thereafter. Content cannot invent a behaviour, which is the point: an
+ * ability that no system implements would silently do nothing.
  */
 export const CAN_ATTACK = 1 << 0;
 export const CAN_GATHER = 1 << 1;
@@ -91,6 +101,16 @@ export const CAN_PRODUCE = 1 << 3;
 export const IS_DROPOFF = 1 << 4;
 /** Must be placed on top of a geothermal vent, and consumes it. */
 export const NEEDS_VENT = 1 << 5;
+
+/** Every ability flag the engine implements, with its content-facing name. */
+export const ABILITY_FLAGS: ReadonlyArray<readonly [string, number]> = [
+  ["attack", CAN_ATTACK],
+  ["gather", CAN_GATHER],
+  ["build", CAN_BUILD],
+  ["produce", CAN_PRODUCE],
+  ["dropoff", IS_DROPOFF],
+  ["needsVent", NEEDS_VENT],
+];
 
 export interface EntityType {
   readonly id: number;
@@ -139,203 +159,11 @@ export interface EntityType {
   readonly plasmaPerSecond: number;
 }
 
-// ---------------------------------------------------------------------------
-// The Vanguard Directive -- race #1
-// ---------------------------------------------------------------------------
-
-export const T_NONE = 0;
-export const T_DRONE = 1;
-export const T_TROOPER = 2;
-export const T_HOVERTANK = 3;
-export const T_SCOUT = 4;
-
-export const T_NEXUS = 10;
-export const T_EXTRACTOR = 11;
-export const T_FOUNDRY = 12;
-export const T_PYLON = 13;
-export const T_TURRET = 14;
-
-export const T_ALLOY_NODE = 20;
-export const T_VENT = 21;
-
 /** Owner id for unowned entities: ore patches, vents, wreckage. */
 export const NEUTRAL_PLAYER = -1;
 
 /** Hard ceiling on supply, regardless of how many pylons are standing. */
 export const MAX_SUPPLY = 200;
-
-const DEFAULTS = {
-  kind: KIND_UNIT,
-  abilities: 0,
-  maxHealth: 100,
-  armour: ARMOUR_LIGHT,
-  radius: fxFromFloat(0.32),
-  footprint: 0,
-  moveSpeed: 0,
-  turnRate: 3600,
-  damage: 0,
-  damageType: DAMAGE_KINETIC,
-  range: 0,
-  cooldown: 20,
-  costAlloy: 0,
-  costPlasma: 0,
-  buildTime: 20,
-  supplyCost: 0,
-  supplyProvided: 0,
-  produces: [] as readonly number[],
-  builds: [] as readonly number[],
-  cargoCapacity: 0,
-  gatherTime: 0,
-  resourceAmount: 0,
-  plasmaPerSecond: 0,
-};
-
-function def(id: number, name: string, overrides: Partial<EntityType>): EntityType {
-  return { ...DEFAULTS, ...overrides, id, name };
-}
-
-const VANGUARD: readonly EntityType[] = [
-  def(T_DRONE, "Drone", {
-    abilities: CAN_GATHER | CAN_BUILD | CAN_ATTACK,
-    maxHealth: 60,
-    moveSpeed: fxFromFloat(0.13),
-    damage: 4,
-    range: fxFromFloat(1.2),
-    cooldown: 22,
-    costAlloy: 50,
-    buildTime: 24,
-    supplyCost: 1,
-    cargoCapacity: 10,
-    gatherTime: 20,
-    builds: [T_NEXUS, T_EXTRACTOR, T_FOUNDRY, T_PYLON, T_TURRET],
-  }),
-
-  def(T_TROOPER, "Trooper", {
-    abilities: CAN_ATTACK,
-    maxHealth: 90,
-    moveSpeed: fxFromFloat(0.12),
-    damage: 9,
-    damageType: DAMAGE_KINETIC,
-    range: fxFromFloat(5),
-    cooldown: 12,
-    costAlloy: 60,
-    buildTime: 30,
-    supplyCost: 2,
-  }),
-
-  def(T_HOVERTANK, "Hovertank", {
-    abilities: CAN_ATTACK,
-    maxHealth: 260,
-    armour: ARMOUR_HEAVY,
-    radius: fxFromFloat(0.45),
-    moveSpeed: fxFromFloat(0.095),
-    turnRate: 2400,
-    damage: 22,
-    damageType: DAMAGE_EXPLOSIVE,
-    range: fxFromFloat(6),
-    cooldown: 26,
-    costAlloy: 120,
-    costPlasma: 40,
-    buildTime: 70,
-    supplyCost: 4,
-  }),
-
-  def(T_SCOUT, "Scout", {
-    abilities: CAN_ATTACK,
-    maxHealth: 70,
-    radius: fxFromFloat(0.28),
-    moveSpeed: fxFromFloat(0.2),
-    turnRate: 5200,
-    damage: 5,
-    range: fxFromFloat(4),
-    cooldown: 14,
-    costAlloy: 45,
-    costPlasma: 10,
-    buildTime: 24,
-    supplyCost: 1,
-  }),
-
-  def(T_NEXUS, "Command Nexus", {
-    kind: KIND_BUILDING,
-    abilities: CAN_PRODUCE | IS_DROPOFF,
-    maxHealth: 1500,
-    armour: ARMOUR_STRUCTURE,
-    radius: fxFromFloat(2),
-    footprint: 4,
-    costAlloy: 400,
-    buildTime: 200,
-    supplyProvided: 10,
-    produces: [T_DRONE],
-  }),
-
-  def(T_EXTRACTOR, "Extractor", {
-    kind: KIND_BUILDING,
-    abilities: NEEDS_VENT,
-    maxHealth: 500,
-    armour: ARMOUR_STRUCTURE,
-    radius: fxFromFloat(1),
-    footprint: 2,
-    costAlloy: 100,
-    buildTime: 100,
-    plasmaPerSecond: 3,
-  }),
-
-  def(T_FOUNDRY, "Foundry", {
-    kind: KIND_BUILDING,
-    abilities: CAN_PRODUCE,
-    maxHealth: 900,
-    armour: ARMOUR_STRUCTURE,
-    radius: fxFromFloat(1.5),
-    footprint: 3,
-    costAlloy: 200,
-    buildTime: 140,
-    produces: [T_TROOPER, T_SCOUT, T_HOVERTANK],
-  }),
-
-  def(T_PYLON, "Supply Pylon", {
-    kind: KIND_BUILDING,
-    maxHealth: 400,
-    armour: ARMOUR_STRUCTURE,
-    radius: fxFromFloat(1),
-    footprint: 2,
-    costAlloy: 80,
-    buildTime: 60,
-    supplyProvided: 8,
-  }),
-
-  def(T_TURRET, "Turret", {
-    kind: KIND_BUILDING,
-    abilities: CAN_ATTACK,
-    maxHealth: 550,
-    armour: ARMOUR_STRUCTURE,
-    radius: fxFromFloat(1),
-    footprint: 2,
-    damage: 16,
-    damageType: DAMAGE_PLASMA,
-    range: fxFromFloat(7),
-    cooldown: 16,
-    costAlloy: 120,
-    costPlasma: 25,
-    buildTime: 80,
-  }),
-
-  def(T_ALLOY_NODE, "Alloy Node", {
-    kind: KIND_RESOURCE,
-    maxHealth: 1,
-    armour: ARMOUR_STRUCTURE,
-    radius: fxFromFloat(1),
-    footprint: 2,
-    resourceAmount: 1500,
-  }),
-
-  def(T_VENT, "Geothermal Vent", {
-    kind: KIND_RESOURCE,
-    maxHealth: 1,
-    armour: ARMOUR_STRUCTURE,
-    radius: fxFromFloat(1),
-    footprint: 2,
-  }),
-];
 
 /**
  * Lookup table indexed directly by type id.
@@ -353,6 +181,11 @@ export class TypeTable {
     const sorted = [...types].sort((a, b) => a.id - b.id);
     this.all = sorted;
     for (const type of sorted) {
+      if (type.id <= 0) {
+        // Zero is reserved: cleared entity slots read back as type 0, and a
+        // real type there would make a dead slot look like a live entity.
+        throw new Error(`TypeTable: type id must be positive, got ${type.id} (${type.name})`);
+      }
       if (this.byId[type.id] !== undefined) {
         throw new Error(`TypeTable: duplicate type id ${type.id} (${type.name})`);
       }
@@ -379,6 +212,3 @@ export class TypeTable {
     return (this.get(id).abilities & ability) !== 0;
   }
 }
-
-/** The default content set: race #1, the Vanguard Directive. */
-export const defaultTypes = new TypeTable(VANGUARD);

@@ -1,9 +1,7 @@
+import { defaultContent } from "@rts/content";
 import {
   MAX_PLAYERS,
-  T_ALLOY_NODE,
-  T_DRONE,
-  T_NEXUS,
-  T_VENT,
+  NEUTRAL_PLAYER,
   TILE_BLOCKED,
   World,
   fxFromFloat,
@@ -19,11 +17,32 @@ import {
  * their welcome message rather than generating it themselves -- two peers
  * independently building a world from the same seed is one more thing that can
  * silently disagree, and copying the bytes cannot.
+ *
+ * Nothing here names a unit or a building. It asks the content set which
+ * structure a race starts with and which worker it starts several of, so a new
+ * race is playable the moment it is defined -- this file is one of the places
+ * that would otherwise quietly need editing per race, and does not.
  */
 
 export const MAP_TILES = 128;
 
 export { MAX_PLAYERS };
+
+/** Race ids in a stable order, for the lobby's faction picker. */
+export const RACE_IDS = defaultContent.races.map((race) => race.id);
+
+/**
+ * How the four slots are populated.
+ *
+ * "mixed" alternates through the available races, which means a guest joining
+ * slot 1 is playing race #2 without anyone having to configure anything. That
+ * is deliberate: an extensibility claim nobody ever sees exercised is a claim
+ * worth doubting.
+ */
+export type FactionMode = "mixed" | string;
+
+const ALLOY_NODE = defaultContent.id("map.alloy-node");
+const VENT = defaultContent.id("map.vent");
 
 /**
  * Player slots are allocated up front rather than when someone joins.
@@ -36,10 +55,9 @@ export { MAX_PLAYERS };
  *
  * The cost is that an unoccupied slot leaves an idle base on the map. It counts
  * toward the victory condition, so a two-player game is technically a
- * four-player free-for-all where two of them never move. Proper lobby slots
- * arrive with the content system in M5.
+ * four-player free-for-all where two of them never move.
  */
-const DRONES_PER_PLAYER = 5;
+const WORKERS_PER_PLAYER = 5;
 
 /** Distance from the map edge to each base's anchor tile. */
 const BASE_INSET = 14;
@@ -51,16 +69,25 @@ const BASE_INSET = 14;
  * looks nicer but makes the two diagonal players play a measurably different
  * opening, and asymmetry is not something to introduce by accident.
  */
-const BASE_PIECES: Array<{ type: number; dx: number; dy: number }> = [
-  { type: T_NEXUS, dx: 0, dy: 0 },
-  { type: T_ALLOY_NODE, dx: 7, dy: 0 },
-  { type: T_ALLOY_NODE, dx: 0, dy: 7 },
-  { type: T_ALLOY_NODE, dx: 7, dy: 7 },
-  { type: T_VENT, dx: -4, dy: 3 },
+const ORE_OFFSETS: Array<[number, number]> = [
+  [7, 0],
+  [0, 7],
+  [7, 7],
 ];
+const VENT_OFFSET: [number, number] = [-4, 3];
 
-export function createMatchWorld(seed: number): World {
-  const world = new World({ mapTiles: MAP_TILES, seed });
+/** Which race each slot plays, given the host's choice. */
+export function raceLineup(mode: FactionMode): string[] {
+  const lineup: string[] = [];
+  for (let player = 0; player < MAX_PLAYERS; player++) {
+    lineup.push(mode === "mixed" ? RACE_IDS[player % RACE_IDS.length] : mode);
+  }
+  return lineup;
+}
+
+export function createMatchWorld(seed: number, mode: FactionMode = "mixed"): World {
+  const world = new World({ mapTiles: MAP_TILES, seed, types: defaultContent.types });
+  const lineup = raceLineup(mode);
   const far = MAP_TILES - BASE_INSET - 8;
 
   /** Anchor tile per player slot, one per corner. */
@@ -90,24 +117,26 @@ export function createMatchWorld(seed: number): World {
     const x = world.rng.nextRange(margin, MAP_TILES - margin - 2);
     const y = world.rng.nextRange(margin, MAP_TILES - margin - 2);
     if (!areaFree(world, x, y, 2)) continue;
-    world.placeStructure(T_ALLOY_NODE, x, y, -1);
+    world.placeStructure(ALLOY_NODE, x, y, NEUTRAL_PLAYER);
   }
 
   for (let player = 0; player < MAX_PLAYERS; player++) {
     const [originX, originY] = origins[player];
+    const race = defaultContent.race(lineup[player]);
 
-    for (const piece of BASE_PIECES) {
-      const owner = piece.type === T_NEXUS ? player : -1;
-      world.placeStructure(piece.type, originX + piece.dx, originY + piece.dy, owner);
+    world.placeStructure(race.startBuilding, originX, originY, player);
+    for (const [dx, dy] of ORE_OFFSETS) {
+      world.placeStructure(ALLOY_NODE, originX + dx, originY + dy, NEUTRAL_PLAYER);
     }
+    world.placeStructure(VENT, originX + VENT_OFFSET[0], originY + VENT_OFFSET[1], NEUTRAL_PLAYER);
 
-    // Drones start in the gap between the Nexus and the nearest ore, so the
-    // opening move is obvious rather than a scavenger hunt.
-    for (let d = 0; d < DRONES_PER_PLAYER; d++) {
+    // Workers start in the gap between the headquarters and the nearest ore, so
+    // the opening move is obvious rather than a scavenger hunt.
+    for (let d = 0; d < WORKERS_PER_PLAYER; d++) {
       spawnTyped(
         world.entities,
         world.types,
-        T_DRONE,
+        race.startUnit,
         tileCentre(originX + 5) + fxFromFloat((d % 3) * 0.7),
         tileCentre(originY + 4) + fxFromFloat(Math.floor(d / 3) * 0.7),
         player,
@@ -137,5 +166,5 @@ function areaFree(world: World, tileX: number, tileY: number, span: number): boo
 
 /** An empty world of the right shape, for a guest to restore a snapshot into. */
 export function createEmptyWorld(): World {
-  return new World({ mapTiles: MAP_TILES, seed: 1 });
+  return new World({ mapTiles: MAP_TILES, seed: 1, types: defaultContent.types });
 }

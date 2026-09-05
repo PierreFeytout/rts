@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { CMD_MOVE, CMD_STOP, type Command } from "./commands.js";
 import { ORDER_MOVE, ORDER_NONE, entityIndex, spawnUnit, type EntityId } from "./entities.js";
 import { enableDevChecks, fxFromFloat, fxLength, fxToFloat } from "./fixed.js";
+import { fixtureTypes } from "./fixture-types.js";
 import { TILE_BLOCKED } from "./grid.js";
 import { World } from "./world.js";
 
@@ -10,7 +11,7 @@ beforeAll(() => {
 });
 
 function makeWorld(mapTiles = 32, seed = 1234): World {
-  return new World({ mapTiles, seed });
+  return new World({ mapTiles, seed, types: fixtureTypes });
 }
 
 function addUnit(w: World, x: number, y: number, owner = 0): EntityId {
