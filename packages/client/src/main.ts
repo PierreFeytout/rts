@@ -1,14 +1,17 @@
+import { HostSession } from "@rts/netcode";
 import {
   TICK_HZ,
-  TickClock,
+  TICK_MS,
   TILE_BLOCKED,
   World,
   enableDevChecks,
   fxFromFloat,
   hashToString,
+  runDeterminismScenario,
   spawnUnit,
   type Command,
 } from "@rts/sim";
+import { VirtualNetwork } from "@rts/transport";
 import * as THREE from "three";
 import { CameraControls } from "./camera-controls.js";
 import { CAMERA_DISTANCE, IsoCamera } from "./iso-camera.js";
@@ -16,12 +19,17 @@ import { Selection } from "./selection.js";
 import { UnitRenderer } from "./units-renderer.js";
 
 /**
- * M1 milestone scene: a real simulation, driven locally.
+ * M2 milestone scene: a single-player match played through the full netcode.
  *
- * There is no networking yet -- commands are applied immediately rather than
- * scheduled through an arbiter. Everything else is the production path: the
- * same `World` the host and every guest will run, the same command objects that
- * will cross the wire, and the same interpolated renderer.
+ * The local player is the host of a match with no guests. Input is not applied
+ * directly -- it goes through the arbiter, is scheduled at `tick + inputDelay`,
+ * and is executed from the broadcast tick schedule, exactly as it will be with
+ * other players connected. The only thing still missing is a transport that
+ * reaches another machine, which is M3.
+ *
+ * Running the real path in single player is deliberate: netcode that is only
+ * exercised once remote peers exist is netcode whose bugs all surface at the
+ * worst possible moment.
  */
 
 enableDevChecks(true);
@@ -72,19 +80,6 @@ function spawnCluster(player: number, originX: number, originY: number, count: n
 
 spawnCluster(0, 4, 4, UNITS_PER_PLAYER);
 spawnCluster(1, MAP_TILES - 16, MAP_TILES - 12, UNITS_PER_PLAYER);
-
-/**
- * Pending commands for the next tick.
- *
- * In M2 this queue becomes the send buffer to the arbiter, and commands are
- * executed at `tick + inputDelay` rather than immediately. Routing input
- * through a queue now means that change is local to this file.
- */
-let pendingCommands: Command[] = [];
-
-function emitCommand(command: Command): void {
-  pendingCommands.push(command);
-}
 
 // ---------------------------------------------------------------------------
 // Renderer
@@ -139,13 +134,37 @@ for (const [x, y, w, h] of obstacles) {
 }
 
 const units = new UnitRenderer(scene, 1024);
+
+/**
+ * The local player hosts a one-player match.
+ *
+ * Even with nobody connected, input goes through the full lockstep path:
+ * commands are scheduled at `tick + inputDelay` and executed from the broadcast
+ * schedule, exactly as they will be with guests present. Running the real path
+ * in single player means M3 changes only which transport gets constructed,
+ * rather than discovering then that the netcode had never actually been driven.
+ *
+ * The virtual network here holds a single peer and no links, so `broadcast` is
+ * a no-op until a real transport replaces it.
+ */
+const network = new VirtualNetwork();
+const session = new HostSession({
+  world,
+  transport: network.addPeer(0),
+  // Snapshot transforms before each step so the renderer can interpolate.
+  onBeforeTick: (w) => units.capturePrevious(w),
+});
+
+function emitCommand(command: Command): void {
+  session.submitLocal(command);
+}
+
 const selection = new Selection(world, rig, canvas, LOCAL_PLAYER, emitCommand);
 
 // ---------------------------------------------------------------------------
 // Loop
 // ---------------------------------------------------------------------------
 
-const clock = new TickClock();
 const hud = document.querySelector<HTMLDivElement>("#hud")!;
 
 let lastFrameMs = performance.now();
@@ -176,32 +195,26 @@ resize();
 function pumpSimulation(nowMs: number): void {
   const deltaMs = nowMs - lastPumpMs;
   lastPumpMs = nowMs;
-  const steps = clock.advance(deltaMs);
-  if (steps === 0) return;
 
   const started = performance.now();
-  for (let s = 0; s < steps; s++) {
-    units.capturePrevious(world);
-    const commands = pendingCommands;
-    pendingCommands = [];
-    world.step(commands);
-  }
+  const steps = session.update(deltaMs);
+  if (steps === 0) return;
+
   lastStepMs = (performance.now() - started) / steps;
   selection.pruneDead();
 }
 
-setInterval(() => pumpSimulation(performance.now()), clock.tickMs / 2);
+setInterval(() => pumpSimulation(performance.now()), TICK_MS / 2);
 
 function renderFrame(): void {
-  units.update(world, clock.alpha, selection.selected);
+  units.update(world, session.alpha, selection.selected);
   renderer.render(scene, rig.camera);
 
   hud.textContent =
     `${fps} fps   tick ${world.tick} @ ${TICK_HZ}Hz   step ${lastStepMs.toFixed(2)}ms` +
-    (clock.dropped > 0 ? `   dropped ${clock.dropped}` : "") +
     `\n${world.entities.count} units   ${selection.selected.size} selected` +
     `   fields built ${world.flowFields.builds}` +
-    `\nhash ${hashToString(world.hash())}`;
+    `\nhash ${hashToString(world.hash())}   input delay ${session.inputDelay}t`;
 }
 
 function frame(nowMs: number): void {
@@ -233,11 +246,17 @@ declare global {
     __rts?: {
       world: World;
       rig: IsoCamera;
-      clock: TickClock;
+      session: HostSession;
       selection: Selection;
       renderFrame: () => void;
       step: (n: number, commands?: Command[]) => void;
       capture: (name?: string, width?: number) => Promise<unknown>;
+      /**
+       * Run the cross-runtime determinism fixture and print its hash trace.
+       * Compare against `node scripts/determinism-trace.mjs`, and against the
+       * same call in another browser engine.
+       */
+      determinism: () => unknown;
     };
   }
 }
@@ -264,15 +283,28 @@ if (import.meta.env.DEV) {
   window.__rts = {
     world,
     rig,
-    clock,
+    session,
     selection,
     renderFrame,
     step: (n: number, commands?: Command[]) => {
-      for (let i = 0; i < n; i++) {
-        units.capturePrevious(world);
-        world.step(i === 0 && commands ? commands : []);
-      }
+      // Goes through the arbiter, so stepping here exercises the same
+      // scheduling path as real input rather than bypassing it.
+      if (commands) for (const command of commands) session.submitLocal(command);
+      for (let i = 0; i < n; i++) session.advanceOneTick();
     },
     capture,
+    determinism: () => {
+      const result = runDeterminismScenario();
+      const out = {
+        runtime: navigator.userAgent,
+        ticks: result.ticks,
+        units: result.unitCount,
+        finalHash: result.finalHash.toString(16).padStart(8, "0"),
+        trace: result.hashes.map((h) => h.toString(16).padStart(8, "0")),
+      };
+       
+      console.log("[determinism]", JSON.stringify(out, null, 2));
+      return out;
+    },
   };
 }

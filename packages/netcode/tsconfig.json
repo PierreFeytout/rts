@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No DOM and no Node types: this logic runs unchanged in the host's browser
+    // tab and in a headless Node arbiter, which is the whole reason it lives in
+    // its own package rather than inside the client.
+    "lib": ["ES2022"],
+    "types": [],
+    "rootDir": "src",
+    "outDir": "dist",
+    "paths": {
+      "@rts/sim": ["../sim/src/index.ts"],
+      "@rts/protocol": ["../protocol/src/index.ts"],
+      "@rts/transport": ["../transport/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"],
+  "references": [{ "path": "../sim" }, { "path": "../protocol" }, { "path": "../transport" }]
+}

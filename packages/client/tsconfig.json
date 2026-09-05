@@ -9,9 +9,17 @@
     // to satisfy project references, so emitting JS as well is wasted work.
     "emitDeclarationOnly": true,
     "paths": {
-      "@rts/sim": ["../sim/src/index.ts"]
+      "@rts/sim": ["../sim/src/index.ts"],
+      "@rts/transport": ["../transport/src/index.ts"],
+      "@rts/protocol": ["../protocol/src/index.ts"],
+      "@rts/netcode": ["../netcode/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../sim" }]
+  "references": [
+    { "path": "../sim" },
+    { "path": "../transport" },
+    { "path": "../protocol" },
+    { "path": "../netcode" }
+  ]
 }

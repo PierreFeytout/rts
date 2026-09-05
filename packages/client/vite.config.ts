@@ -12,6 +12,9 @@ export default defineConfig({
       // simulation hot-reloads without a separate `tsc --build` step.
       // Typechecking still happens through project references via `npm run typecheck`.
       "@rts/sim": fileURLToPath(new URL("../sim/src/index.ts", import.meta.url)),
+      "@rts/transport": fileURLToPath(new URL("../transport/src/index.ts", import.meta.url)),
+      "@rts/protocol": fileURLToPath(new URL("../protocol/src/index.ts", import.meta.url)),
+      "@rts/netcode": fileURLToPath(new URL("../netcode/src/index.ts", import.meta.url)),
     },
   },
   server: {

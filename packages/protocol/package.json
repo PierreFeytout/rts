@@ -1,0 +1,15 @@
+{
+  "name": "@rts/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "dependencies": {
+    "@rts/sim": "*",
+    "msgpackr": "^2.1.0"
+  }
+}

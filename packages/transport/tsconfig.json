@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No "dom": the WebRTC implementation lands in M3 and will declare the
+    // handful of RTC types it needs. Keeping DOM out means this package can
+    // host a Node WebSocket transport for the headless arbiter without
+    // accidentally depending on browser globals.
+    "lib": ["ES2022"],
+    "types": [],
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

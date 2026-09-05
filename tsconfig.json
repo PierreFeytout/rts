@@ -1,4 +1,10 @@
 {
   "files": [],
-  "references": [{ "path": "./packages/sim" }, { "path": "./packages/client" }]
+  "references": [
+    { "path": "./packages/sim" },
+    { "path": "./packages/transport" },
+    { "path": "./packages/protocol" },
+    { "path": "./packages/netcode" },
+    { "path": "./packages/client" }
+  ]
 }

@@ -9,7 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@rts/netcode": "*",
+    "@rts/protocol": "*",
     "@rts/sim": "*",
+    "@rts/transport": "*",
     "three": "^0.185.1"
   },
   "devDependencies": {

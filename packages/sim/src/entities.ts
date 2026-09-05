@@ -81,14 +81,21 @@ export class EntityStore {
   count = 0;
 
   /**
-   * Recycled slots, used as a stack.
+   * Scan hint for the next free slot.
    *
-   * Determinism does not require any particular reuse policy, only that every
-   * peer applies the same sequence of spawns and despawns -- which lockstep
-   * guarantees. A stack is chosen because it keeps `highWater` low, which
-   * directly reduces per-tick hashing and iteration cost.
+   * Allocation always takes the LOWEST free slot, which makes it a pure
+   * function of the `alive` bitmap. That matters more than it looks: an
+   * explicit free list would carry allocation order as hidden state, so a peer
+   * that resynced from a snapshot (and rebuilt its list from liveness bits)
+   * would allocate differently from a peer whose list came from its own
+   * despawn history -- and the two would desync on the very next spawn, making
+   * the resync appear not to have taken.
+   *
+   * INVARIANT: every slot below `lowestFreeHint` is alive. The hint is
+   * therefore only ever an optimisation -- scanning from 0 finds the same slot
+   * -- so it cannot itself be a source of divergence and needs no serialising.
    */
-  private readonly freeList: number[] = [];
+  private lowestFreeHint = 0;
 
   /** Component arrays in a fixed order. The hash depends on this order. */
   private readonly hashed = [
@@ -110,17 +117,24 @@ export class EntityStore {
     this.settled,
   ];
 
-  /** Allocate a slot. Returns NULL_ENTITY when the store is full. */
+  /** Allocate the lowest free slot. Returns NULL_ENTITY when the store is full. */
   spawn(): EntityId {
-    let index: number;
-    const recycled = this.freeList.pop();
-    if (recycled !== undefined) {
-      index = recycled;
-    } else {
+    let index = -1;
+    for (let i = this.lowestFreeHint; i < this.highWater; i++) {
+      if (this.alive[i] === 0) {
+        index = i;
+        break;
+      }
+    }
+
+    if (index === -1) {
       if (this.highWater >= MAX_ENTITIES) return NULL_ENTITY;
       index = this.highWater++;
     }
 
+    // Everything below index is now known occupied, which re-establishes the
+    // invariant documented on lowestFreeHint.
+    this.lowestFreeHint = index + 1;
     this.alive[index] = 1;
     this.count++;
     return makeId(index, this.generation[index]);
@@ -136,7 +150,7 @@ export class EntityStore {
     // same slot to collide, which cannot happen within a match.
     this.generation[index] = (this.generation[index] + 1) & 0xffff;
     this.count--;
-    this.freeList.push(index);
+    if (index < this.lowestFreeHint) this.lowestFreeHint = index;
 
     // Zero every component. Dead slots are still covered by the state hash, so
     // leaving stale values behind would make the hash depend on an entity's
@@ -167,9 +181,20 @@ export class EntityStore {
     for (let i = 0; i < this.highWater; i++) this.clearSlot(i);
     this.alive.fill(0);
     this.generation.fill(0);
-    this.freeList.length = 0;
+    this.lowestFreeHint = 0;
     this.highWater = 0;
     this.count = 0;
+  }
+
+  /**
+   * Re-establish the allocation hint after a snapshot restore.
+   *
+   * Safe to reset to 0 unconditionally: the hint's only invariant is that
+   * nothing below it is free, and scanning from 0 always finds the correct
+   * lowest free slot regardless.
+   */
+  resetAllocationHint(): void {
+    this.lowestFreeHint = 0;
   }
 
   /**
