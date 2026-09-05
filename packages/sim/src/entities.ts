@@ -1,5 +1,7 @@
 import { hashArrayPrefix, hashNumber } from "./hash.js";
 import type { Fx } from "./fixed.js";
+import { tileCentre } from "./grid.js";
+import type { TypeTable } from "./types.js";
 
 /**
  * Structure-of-arrays entity store.
@@ -18,14 +20,40 @@ import type { Fx } from "./fixed.js";
  * A hand-rolled store is used rather than an ECS library because the ordering
  * and allocation guarantees above ARE the determinism guarantee, and they need
  * to be verifiable by reading this file rather than a dependency's internals.
+ *
+ * Note what is NOT stored here: anything derivable from `typeId`. Maximum
+ * health, damage, cost and range all live in the type table. Copying them per
+ * entity would double the hash cost and, worse, allow a unit's stats to drift
+ * out of agreement with its own type.
  */
 
 /** Maximum simultaneous entities. Well above the 400-unit target. */
 export const MAX_ENTITIES = 2048;
 
+/**
+ * Production queue depth per building.
+ *
+ * Fixed rather than growable: a variable-length queue would either need
+ * per-entity allocation in the hot path or a side table whose iteration order
+ * becomes a determinism question. Five is the depth players actually use.
+ */
+export const PRODUCTION_QUEUE_CAP = 5;
+
 /** Order kinds. Plain integer constants -- `erasableSyntaxOnly` forbids enums. */
 export const ORDER_NONE = 0;
 export const ORDER_MOVE = 1;
+/** Chase and shoot one specific entity until it dies. */
+export const ORDER_ATTACK = 2;
+/** Advance toward a point, engaging anything hostile encountered on the way. */
+export const ORDER_ATTACK_MOVE = 3;
+/** Harvest a specific ore node. */
+export const ORDER_GATHER = 4;
+/** Carrying a full load, walking it back to a drop-off. */
+export const ORDER_RETURN = 5;
+/** Walk to a construction site and work on it. */
+export const ORDER_BUILD = 6;
+/** Stand still, but shoot anything that comes into range. */
+export const ORDER_HOLD = 7;
 
 /**
  * An entity handle: slot index in the low 16 bits, generation in the high 16.
@@ -75,6 +103,39 @@ export class EntityStore {
   /** 1 once the entity has reached its destination and should stop shoving. */
   readonly settled = new Uint8Array(MAX_ENTITIES);
 
+  // -- combat ---------------------------------------------------------------
+
+  /** Entity this one is shooting or working on. NULL_ENTITY when none. */
+  readonly targetId = new Int32Array(MAX_ENTITIES);
+  /** Ticks until the weapon may fire again. */
+  readonly cooldown = new Int32Array(MAX_ENTITIES);
+
+  // -- economy --------------------------------------------------------------
+
+  /** Alloy currently carried by a harvester. */
+  readonly cargo = new Int32Array(MAX_ENTITIES);
+  /** Ticks of mining still owed before the load is full. */
+  readonly gatherTimer = new Int32Array(MAX_ENTITIES);
+  /** Ore left in a resource node. */
+  readonly resource = new Int32Array(MAX_ENTITIES);
+
+  // -- construction and production -----------------------------------------
+
+  /**
+   * Ticks of construction still owed. Non-zero means the building is a site:
+   * it blocks terrain and can be shot, but does not yet function.
+   */
+  readonly buildRemaining = new Int32Array(MAX_ENTITIES);
+  /** Ticks left on the item at the head of the production queue. */
+  readonly produceRemaining = new Int32Array(MAX_ENTITIES);
+  /** Number of valid entries in this entity's queue slice. */
+  readonly queueLen = new Uint8Array(MAX_ENTITIES);
+  /** Flat production queues: entity `i` owns `[i * CAP, i * CAP + CAP)`. */
+  readonly queue = new Int32Array(MAX_ENTITIES * PRODUCTION_QUEUE_CAP);
+  /** Where newly produced units walk to. */
+  readonly rallyX = new Int32Array(MAX_ENTITIES);
+  readonly rallyY = new Int32Array(MAX_ENTITIES);
+
   /** Highest slot index ever used, plus one. Bounds every iteration. */
   highWater = 0;
   /** Number of live entities. */
@@ -97,7 +158,11 @@ export class EntityStore {
    */
   private lowestFreeHint = 0;
 
-  /** Component arrays in a fixed order. The hash depends on this order. */
+  /**
+   * Component arrays in a fixed order. The hash depends on this order, and so
+   * does the snapshot format -- see `entityArrays` in snapshot.ts, which MUST
+   * stay in step with this list.
+   */
   private readonly hashed = [
     this.alive,
     this.generation,
@@ -115,6 +180,16 @@ export class EntityStore {
     this.orderY,
     this.flowGoal,
     this.settled,
+    this.targetId,
+    this.cooldown,
+    this.cargo,
+    this.gatherTimer,
+    this.resource,
+    this.buildRemaining,
+    this.produceRemaining,
+    this.queueLen,
+    this.rallyX,
+    this.rallyY,
   ];
 
   /** Allocate the lowest free slot. Returns NULL_ENTITY when the store is full. */
@@ -176,6 +251,56 @@ export class EntityStore {
     return makeId(index, this.generation[index]);
   }
 
+  /**
+   * Slot index for a live handle, or -1 if it is stale.
+   *
+   * The pairing of `isAlive` then `entityIndex` is by far the most repeated
+   * two-line idiom in the systems; folding it into one call removes a class of
+   * bug where the liveness check is forgotten and a dead slot's zeroed
+   * components are read as if they were real.
+   */
+  indexOfLive(id: EntityId): number {
+    return this.isAlive(id) ? entityIndex(id) : -1;
+  }
+
+  // -- production queue -----------------------------------------------------
+
+  /** Append a type id to a building's queue. False if the queue is full. */
+  enqueue(index: number, typeId: number): boolean {
+    const len = this.queueLen[index];
+    if (len >= PRODUCTION_QUEUE_CAP) return false;
+    this.queue[index * PRODUCTION_QUEUE_CAP + len] = typeId;
+    this.queueLen[index] = len + 1;
+    return true;
+  }
+
+  /** Queue entry at a position, or T_NONE (0) if out of range. */
+  queueAt(index: number, position: number): number {
+    if (position < 0 || position >= this.queueLen[index]) return 0;
+    return this.queue[index * PRODUCTION_QUEUE_CAP + position];
+  }
+
+  /**
+   * Remove one queue entry, shifting the rest down.
+   *
+   * Compaction rather than a ring buffer: the queue is at most five entries, so
+   * the shift is free, and a dense array means the hash covers exactly the
+   * entries that exist rather than a head/tail pair that can describe the same
+   * queue two different ways.
+   */
+  dequeueAt(index: number, position: number): number {
+    const len = this.queueLen[index];
+    if (position < 0 || position >= len) return 0;
+    const base = index * PRODUCTION_QUEUE_CAP;
+    const removed = this.queue[base + position];
+    for (let k = position; k < len - 1; k++) {
+      this.queue[base + k] = this.queue[base + k + 1];
+    }
+    this.queue[base + len - 1] = 0;
+    this.queueLen[index] = len - 1;
+    return removed;
+  }
+
   /** Reset to an empty store. */
   clear(): void {
     for (let i = 0; i < this.highWater; i++) this.clearSlot(i);
@@ -209,7 +334,9 @@ export class EntityStore {
     for (const array of this.hashed) {
       acc = hashArrayPrefix(acc, array, this.highWater);
     }
-    return acc;
+    // Queues are strided, so they need their own prefix length rather than
+    // riding along with the per-slot arrays above.
+    return hashArrayPrefix(acc, this.queue, this.highWater * PRODUCTION_QUEUE_CAP);
   }
 
   private clearSlot(index: number): void {
@@ -227,6 +354,18 @@ export class EntityStore {
     this.orderY[index] = 0;
     this.flowGoal[index] = -1;
     this.settled[index] = 0;
+    this.targetId[index] = NULL_ENTITY;
+    this.cooldown[index] = 0;
+    this.cargo[index] = 0;
+    this.gatherTimer[index] = 0;
+    this.resource[index] = 0;
+    this.buildRemaining[index] = 0;
+    this.produceRemaining[index] = 0;
+    this.queueLen[index] = 0;
+    this.rallyX[index] = 0;
+    this.rallyY[index] = 0;
+    const base = index * PRODUCTION_QUEUE_CAP;
+    for (let k = 0; k < PRODUCTION_QUEUE_CAP; k++) this.queue[base + k] = 0;
   }
 }
 
@@ -261,5 +400,68 @@ export function spawnUnit(store: EntityStore, spec: SpawnSpec): EntityId {
   store.orderY[i] = 0;
   store.flowGoal[i] = -1;
   store.settled[i] = 0;
+  store.targetId[i] = NULL_ENTITY;
+  store.cooldown[i] = 0;
+  store.cargo[i] = 0;
+  store.gatherTimer[i] = 0;
+  store.resource[i] = 0;
+  store.buildRemaining[i] = 0;
+  store.produceRemaining[i] = 0;
+  store.queueLen[i] = 0;
+  store.rallyX[i] = 0;
+  store.rallyY[i] = 0;
   return id;
+}
+
+/**
+ * Spawn an entity of a given type, taking every stat from the type table.
+ *
+ * This is the only spawn path gameplay should use. `spawnUnit` remains for
+ * tests and the determinism fixture, which want arbitrary stats without
+ * inventing a content entry for them.
+ */
+export function spawnTyped(
+  store: EntityStore,
+  types: TypeTable,
+  typeId: number,
+  x: Fx,
+  y: Fx,
+  owner: number,
+  facing = 0,
+): EntityId {
+  const type = types.get(typeId);
+  const id = spawnUnit(store, {
+    x,
+    y,
+    facing,
+    radius: type.radius,
+    moveSpeed: type.moveSpeed,
+    turnRate: type.turnRate,
+    owner,
+    typeId,
+    health: type.maxHealth,
+  });
+  if (id === NULL_ENTITY) return id;
+
+  const i = entityIndex(id);
+  store.resource[i] = type.resourceAmount;
+  // Buildings default their rally point to their own centre; the first rally
+  // command replaces it. Zero would send every new unit to the map corner.
+  store.rallyX[i] = x;
+  store.rallyY[i] = y;
+  // Buildings and resource nodes never move, so they are settled from birth --
+  // otherwise separation steering would try to shove a Nexus.
+  if (type.footprint > 0) store.settled[i] = 1;
+  return id;
+}
+
+/**
+ * Centre of a building's footprint, given its anchor tile.
+ *
+ * Buildings are anchored by their top-left tile so the placement grid is
+ * unambiguous, but positioned by their centre so range and collision maths do
+ * not have to special-case them against units.
+ */
+export function footprintCentre(anchorTile: number, footprint: number): Fx {
+  return tileCentre(anchorTile) + (((footprint - 1) << 16) >> 1);
 }

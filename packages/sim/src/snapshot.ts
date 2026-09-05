@@ -1,4 +1,5 @@
-import { MAX_ENTITIES } from "./entities.js";
+import { MAX_ENTITIES, PRODUCTION_QUEUE_CAP } from "./entities.js";
+import { MAX_PLAYERS } from "./players.js";
 import type { World } from "./world.js";
 
 /**
@@ -21,9 +22,12 @@ import type { World } from "./world.js";
  */
 
 /** Bumped whenever the layout below changes, so a mismatch fails loudly. */
-export const SNAPSHOT_VERSION = 1;
+export const SNAPSHOT_VERSION = 2;
 
 const MAGIC = 0x52545331; // "RTS1"
+
+/** magic, version, tick, rng, highWater, count, gridVersion, mapTiles, gridBytes, winner. */
+const HEADER_INTS = 10;
 
 /**
  * Entity component arrays, in serialisation order.
@@ -51,6 +55,16 @@ function entityArrays(world: World): Array<Int32Array | Uint8Array | Uint16Array
     e.orderY,
     e.flowGoal,
     e.settled,
+    e.targetId,
+    e.cooldown,
+    e.cargo,
+    e.gatherTimer,
+    e.resource,
+    e.buildRemaining,
+    e.produceRemaining,
+    e.queueLen,
+    e.rallyX,
+    e.rallyY,
   ];
 }
 
@@ -59,20 +73,22 @@ export function encodeSnapshot(world: World): Uint8Array {
   const e = world.entities;
   const n = e.highWater;
   const gridBytes = world.grid.tiles.length;
-
-  // Header: magic, version, tick, rng, highWater, count, gridVersion,
-  // mapTiles, gridBytes.
-  const headerInts = 9;
   const arrays = entityArrays(world);
+  const players = world.players;
 
-  let bytes = headerInts * 4;
+  let bytes = HEADER_INTS * 4;
   for (const array of arrays) bytes += n * array.BYTES_PER_ELEMENT;
+  // Production queues are strided rather than one entry per slot, so they get
+  // their own length rather than riding along with the arrays above.
+  bytes += n * PRODUCTION_QUEUE_CAP * 4;
+  bytes += players.arrays().length * MAX_PLAYERS * 4;
+  bytes += players.flagArrays().length * MAX_PLAYERS;
   bytes += gridBytes;
   // Pad to a 4-byte boundary so the Int32Array header view is always aligned.
   bytes = (bytes + 3) & ~3;
 
   const buffer = new ArrayBuffer(bytes);
-  const header = new Int32Array(buffer, 0, headerInts);
+  const header = new Int32Array(buffer, 0, HEADER_INTS);
   header[0] = MAGIC;
   header[1] = SNAPSHOT_VERSION;
   header[2] = world.tick;
@@ -82,15 +98,28 @@ export function encodeSnapshot(world: World): Uint8Array {
   header[6] = world.grid.version;
   header[7] = world.mapTiles;
   header[8] = gridBytes;
+  header[9] = players.winner;
 
   const out = new Uint8Array(buffer);
-  let offset = headerInts * 4;
+  let offset = HEADER_INTS * 4;
 
-  for (const array of arrays) {
-    const slice = new Uint8Array(array.buffer, array.byteOffset, n * array.BYTES_PER_ELEMENT);
+  const write = (
+    array: Int32Array | Uint8Array | Uint16Array,
+    elements: number,
+  ): void => {
+    const slice = new Uint8Array(
+      array.buffer,
+      array.byteOffset,
+      elements * array.BYTES_PER_ELEMENT,
+    );
     out.set(slice, offset);
     offset += slice.byteLength;
-  }
+  };
+
+  for (const array of arrays) write(array, n);
+  write(e.queue, n * PRODUCTION_QUEUE_CAP);
+  for (const array of players.arrays()) write(array, MAX_PLAYERS);
+  for (const array of players.flagArrays()) write(array, MAX_PLAYERS);
 
   out.set(world.grid.tiles, offset);
   return out;
@@ -107,10 +136,9 @@ export function encodeSnapshot(world: World): Uint8Array {
 export function decodeSnapshot(world: World, data: Uint8Array): void {
   // A misaligned byteOffset would make the Int32Array view throw, and a copied
   // payload from the wire has no alignment guarantee.
-  const aligned =
-    data.byteOffset % 4 === 0 ? data : new Uint8Array(data.slice().buffer);
+  const aligned = data.byteOffset % 4 === 0 ? data : new Uint8Array(data.slice().buffer);
 
-  const header = new Int32Array(aligned.buffer, aligned.byteOffset, 9);
+  const header = new Int32Array(aligned.buffer, aligned.byteOffset, HEADER_INTS);
   if (header[0] !== MAGIC) throw new Error("snapshot: bad magic");
   if (header[1] !== SNAPSHOT_VERSION) {
     throw new Error(`snapshot: version ${header[1]}, expected ${SNAPSHOT_VERSION}`);
@@ -123,30 +151,39 @@ export function decodeSnapshot(world: World, data: Uint8Array): void {
   }
   const gridBytes = header[8];
   if (gridBytes !== world.grid.tiles.length) {
-    throw new Error(`snapshot: grid is ${gridBytes} bytes, world expects ${world.grid.tiles.length}`);
+    throw new Error(
+      `snapshot: grid is ${gridBytes} bytes, world expects ${world.grid.tiles.length}`,
+    );
   }
 
   const e = world.entities;
   e.clear();
+  world.players.reset();
 
-  const arrays = entityArrays(world);
-  let offset = 9 * 4;
-  for (const array of arrays) {
-    const byteLength = n * array.BYTES_PER_ELEMENT;
+  let offset = HEADER_INTS * 4;
+  const read = (
+    array: Int32Array | Uint8Array | Uint16Array,
+    elements: number,
+  ): void => {
+    const byteLength = elements * array.BYTES_PER_ELEMENT;
     const view = new Uint8Array(aligned.buffer, aligned.byteOffset + offset, byteLength);
     new Uint8Array(array.buffer, array.byteOffset, byteLength).set(view);
     offset += byteLength;
-  }
+  };
 
-  world.grid.tiles.set(
-    new Uint8Array(aligned.buffer, aligned.byteOffset + offset, gridBytes),
-  );
+  for (const array of entityArrays(world)) read(array, n);
+  read(e.queue, n * PRODUCTION_QUEUE_CAP);
+  for (const array of world.players.arrays()) read(array, MAX_PLAYERS);
+  for (const array of world.players.flagArrays()) read(array, MAX_PLAYERS);
+
+  world.grid.tiles.set(new Uint8Array(aligned.buffer, aligned.byteOffset + offset, gridBytes));
 
   world.tick = header[2];
   world.rng.state = header[3];
   e.highWater = n;
   e.count = header[5];
   world.grid.version = header[6];
+  world.players.winner = header[9];
 
   // Allocation takes the lowest free slot, so it is a pure function of the
   // restored `alive` bitmap and needs nothing serialised. Resetting the scan

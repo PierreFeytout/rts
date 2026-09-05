@@ -3,9 +3,9 @@ import { FX_ONE, type Fx } from "./fixed.js";
 /**
  * Passability grid.
  *
- * One byte per tile: 0 is walkable, 1 is blocked. Terrain height is deliberately
- * absent -- the simulation is 2D, and cliffs are represented as blocked tiles
- * that the renderer happens to draw tall. Keeping elevation out of the sim means
+ * One byte per tile: 0 is walkable, anything else is impassable. Terrain height
+ * is deliberately absent -- the simulation is 2D, and cliffs are represented as
+ * blocked tiles that the renderer happens to draw tall. Keeping elevation out of the sim means
  * pathfinding, ranges and collision stay 2D problems.
  *
  * `version` increments on every mutation. Derived structures (flow fields) carry
@@ -14,7 +14,18 @@ import { FX_ONE, type Fx } from "./fixed.js";
  */
 
 export const TILE_WALKABLE = 0;
+/** Impassable terrain: cliffs and rock. Drawn by the renderer as raised blocks. */
 export const TILE_BLOCKED = 1;
+/**
+ * Occupied by a building or resource node's footprint.
+ *
+ * Pathing treats this exactly like TILE_BLOCKED -- `isBlocked` tests against
+ * TILE_WALKABLE, not against a specific value -- but the two must stay
+ * distinguishable, because the renderer derives its terrain blocks from this
+ * same grid. Without the distinction every Nexus and ore patch was drawn as a
+ * cliff with the actual building buried inside it.
+ */
+export const TILE_STRUCTURE = 2;
 
 export class CostGrid {
   readonly width: number;

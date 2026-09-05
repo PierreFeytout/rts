@@ -1,7 +1,17 @@
-import { CMD_MOVE, CMD_STOP, type Command } from "./commands.js";
-import { spawnUnit, type EntityId } from "./entities.js";
+import {
+  CMD_ATTACK_MOVE,
+  CMD_BUILD,
+  CMD_GATHER,
+  CMD_MOVE,
+  CMD_STOP,
+  CMD_TRAIN,
+  type Command,
+} from "./commands.js";
+import { spawnTyped, type EntityId } from "./entities.js";
 import { fxFromFloat } from "./fixed.js";
 import { TILE_BLOCKED } from "./grid.js";
+import { recomputeSupplyAndDefeat } from "./production.js";
+import { T_ALLOY_NODE, T_DRONE, T_NEXUS, T_PYLON, T_TROOPER } from "./types.js";
 import { World } from "./world.js";
 
 /**
@@ -16,8 +26,10 @@ import { World } from "./world.js";
  *
  * The scenario deliberately exercises the parts most likely to differ:
  * trigonometry (unit facing), square roots (distance), division (steering
- * normalisation), pathfinding around obstacles, and dense crowd separation
- * where tiny differences amplify fastest.
+ * normalisation), pathfinding around obstacles, dense crowd separation where
+ * tiny differences amplify fastest, and -- since M4 -- the gameplay systems
+ * that accumulate integer state over hundreds of ticks: the damage matrix and
+ * death, harvesting round trips, construction, and production queues.
  *
  * Any change to simulation behaviour changes these hashes. That is intended --
  * the numbers are compared between runtimes at the same commit, never against
@@ -39,11 +51,23 @@ export interface ScenarioOptions {
   seed?: number;
 }
 
-/** Build the fixture world. Same inputs must give the same world everywhere. */
-export function buildScenarioWorld(mapTiles = 64, seed = 0x5ca1ab1e): {
-  world: World;
+/** Handles the command script needs to address. */
+export interface ScenarioActors {
+  /** Combat units, alternating owner by index. */
   units: EntityId[];
-} {
+  /** Harvesters belonging to player 0. */
+  drones: EntityId[];
+  /** Player 0's headquarters. */
+  nexus: EntityId;
+  /** The ore patch player 0's drones work. */
+  node: EntityId;
+}
+
+/** Build the fixture world. Same inputs must give the same world everywhere. */
+export function buildScenarioWorld(
+  mapTiles = 64,
+  seed = 0x5ca1ab1e,
+): { world: World; actors: ScenarioActors } {
   const world = new World({ mapTiles, seed });
 
   // Obstacles from the seeded rng, so the layout is part of the fixture rather
@@ -56,6 +80,29 @@ export function buildScenarioWorld(mapTiles = 64, seed = 0x5ca1ab1e): {
     world.grid.fillRect(x, y, w, h, TILE_BLOCKED);
   }
 
+  // An economy for player 0, in the far corner from where the fighting starts.
+  const nexus = world.placeStructure(T_NEXUS, mapTiles - 14, mapTiles - 14, 0);
+  const node = world.placeStructure(T_ALLOY_NODE, mapTiles - 7, mapTiles - 14, -1);
+
+  const drones: EntityId[] = [];
+  for (let i = 0; i < 6; i++) {
+    drones.push(
+      spawnTyped(
+        world.entities,
+        world.types,
+        T_DRONE,
+        fxFromFloat(mapTiles - 9 + (i % 3) * 0.7),
+        fxFromFloat(mapTiles - 10 + Math.floor(i / 3) * 0.7),
+        0,
+      ),
+    );
+  }
+
+  // Two armies of Troopers. Alternating ownership by index means the crowd is
+  // interleaved rather than segregated, so the moment they are sent to the same
+  // point they are already in contact -- which is where any arithmetic
+  // difference amplifies fastest, and now where the damage matrix is exercised
+  // hardest as well.
   const units: EntityId[] = [];
   for (let i = 0; i < 120; i++) {
     const player = i % 2;
@@ -63,25 +110,24 @@ export function buildScenarioWorld(mapTiles = 64, seed = 0x5ca1ab1e): {
     const y = 4 + Math.floor(i / 10) * 0.7;
     if (world.grid.isBlocked(Math.floor(x), Math.floor(y))) continue;
     units.push(
-      spawnUnit(world.entities, {
-        x: fxFromFloat(x),
-        y: fxFromFloat(y),
-        radius: fxFromFloat(0.32),
-        moveSpeed: fxFromFloat(0.17),
-        turnRate: 3600,
-        owner: player,
-        typeId: 1,
-        health: 100,
-      }),
+      spawnTyped(world.entities, world.types, T_TROOPER, fxFromFloat(x), fxFromFloat(y), player),
     );
   }
 
-  return { world, units };
+  world.players.inPlay[0] = 1;
+  world.players.inPlay[1] = 1;
+  recomputeSupplyAndDefeat(world);
+
+  return { world, actors: { units, drones, nexus, node } };
 }
 
 /** The scripted command stream. Pure function of tick. */
-export function scenarioCommands(units: EntityId[], tick: number, mapTiles: number): Command[] {
-  const of = (player: number): EntityId[] => units.filter((_, i) => i % 2 === player);
+export function scenarioCommands(
+  actors: ScenarioActors,
+  tick: number,
+  mapTiles: number,
+): Command[] {
+  const of = (player: number): EntityId[] => actors.units.filter((_, i) => i % 2 === player);
   const move = (player: number, x: number, y: number): Command => ({
     kind: CMD_MOVE,
     playerId: player,
@@ -91,14 +137,47 @@ export function scenarioCommands(units: EntityId[], tick: number, mapTiles: numb
   });
 
   switch (tick) {
+    case 1:
+      return [
+        { kind: CMD_GATHER, playerId: 0, entities: actors.drones, target: actors.node },
+        { kind: CMD_TRAIN, playerId: 0, building: actors.nexus, unitType: T_DRONE },
+      ];
     case 2:
       return [move(0, mapTiles - 8, mapTiles - 8)];
     case 25:
       return [move(1, mapTiles - 8, 6)];
+    case 60:
+      // A construction site, so build progress and the grid mutation it causes
+      // are part of the hashed state for the rest of the run.
+      return [
+        {
+          kind: CMD_BUILD,
+          playerId: 0,
+          entities: [actors.drones[0]],
+          buildingType: T_PYLON,
+          tileX: mapTiles - 18,
+          tileY: mapTiles - 12,
+        },
+      ];
     case 90:
-      // Send both to the same point: maximum crowd pressure, where any
-      // arithmetic difference amplifies fastest.
-      return [move(0, mapTiles / 2, mapTiles / 2), move(1, mapTiles / 2, mapTiles / 2)];
+      // Send both armies to the same point: maximum crowd pressure, and the
+      // two sides are now hostile, so this is also where combat resolves.
+      return [
+        {
+          kind: CMD_ATTACK_MOVE,
+          playerId: 0,
+          entities: of(0),
+          targetX: fxFromFloat(mapTiles / 2),
+          targetY: fxFromFloat(mapTiles / 2),
+        },
+        {
+          kind: CMD_ATTACK_MOVE,
+          playerId: 1,
+          entities: of(1),
+          targetX: fxFromFloat(mapTiles / 2),
+          targetY: fxFromFloat(mapTiles / 2),
+        },
+      ];
     case 200:
       return [{ kind: CMD_STOP, playerId: 0, entities: of(0) }];
     case 240:
@@ -116,11 +195,11 @@ export function runDeterminismScenario(options: ScenarioOptions = {}): ScenarioR
   const sampleInterval = options.sampleInterval ?? 50;
   const mapTiles = options.mapTiles ?? 64;
 
-  const { world, units } = buildScenarioWorld(mapTiles, options.seed);
+  const { world, actors } = buildScenarioWorld(mapTiles, options.seed);
   const hashes: number[] = [];
 
   for (let t = 0; t < ticks; t++) {
-    world.step(scenarioCommands(units, t, mapTiles));
+    world.step(scenarioCommands(actors, t, mapTiles));
     if (world.tick % sampleInterval === 0) hashes.push(world.hash());
   }
 

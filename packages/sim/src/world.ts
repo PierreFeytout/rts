@@ -1,11 +1,44 @@
-import { CMD_MOVE, CMD_STOP, type Command } from "./commands.js";
+import { isHostile, killEntity, runCombat } from "./combat.js";
 import {
-  entityIndex,
-  EntityStore,
+  CMD_ATTACK,
+  CMD_ATTACK_MOVE,
+  CMD_BUILD,
+  CMD_CANCEL_TRAIN,
+  CMD_GATHER,
+  CMD_HOLD,
+  CMD_MOVE,
+  CMD_RALLY,
+  CMD_STOP,
+  CMD_TRAIN,
+  type BuildCommand,
+  type Command,
+} from "./commands.js";
+import { runEconomy, walkTo } from "./economy.js";
+import {
   MAX_ENTITIES,
+  NULL_ENTITY,
+  ORDER_ATTACK,
+  ORDER_ATTACK_MOVE,
+  ORDER_BUILD,
+  ORDER_GATHER,
+  ORDER_HOLD,
   ORDER_MOVE,
   ORDER_NONE,
+  ORDER_RETURN,
+  EntityStore,
+  entityIndex,
+  footprintCentre,
+  spawnTyped,
+  type EntityId,
 } from "./entities.js";
+import {
+  BLOCKED_QUEUE_FULL,
+  BLOCKED_RESOURCES,
+  BLOCKED_SPACE,
+  BLOCKED_SUPPLY,
+  EV_BLOCKED,
+  EventLog,
+} from "./events.js";
 import {
   FX_ONE,
   fxAtan2,
@@ -18,10 +51,22 @@ import {
   type Fx,
 } from "./fixed.js";
 import { DIR_X, DIR_Y, FlowFieldCache } from "./flowfield.js";
-import { CostGrid, worldToTile } from "./grid.js";
+import { CostGrid, TILE_STRUCTURE, TILE_WALKABLE, worldToTile } from "./grid.js";
 import { hashFinish, hashInit, hashNumber } from "./hash.js";
+import { PlayerState } from "./players.js";
+import { recomputeSupplyAndDefeat, runConstruction, runProduction } from "./production.js";
 import { Rng } from "./rng.js";
 import { SpatialHash } from "./spatial.js";
+import type { TypeTable } from "./types.js";
+import {
+  CAN_BUILD,
+  CAN_GATHER,
+  CAN_PRODUCE,
+  KIND_BUILDING,
+  KIND_RESOURCE,
+  NEEDS_VENT,
+  defaultTypes,
+} from "./types.js";
 
 /**
  * The simulation world.
@@ -35,11 +80,6 @@ import { SpatialHash } from "./spatial.js";
 
 /** How close a unit must get before it counts as arrived. */
 const ARRIVAL_RADIUS = fxFromFloat(0.3);
-/**
- * Largest radius any unit type may have. Used to size neighbour queries so
- * that no overlapping pair can be missed. Raise this if a bigger unit is added.
- */
-const MAX_UNIT_RADIUS = fxFromFloat(1.5);
 /** How hard overlapping units shove each other apart, as a fraction of overlap. */
 const SEPARATION_STRENGTH = fxFromFloat(0.5);
 /** Settled units resist being shoved, so arrived formations stop churning. */
@@ -64,11 +104,19 @@ const MAX_SEPARATION_STEP = fxFromFloat(0.25);
  * Sized so it cannot overflow in practice: queries cover only a couple of tiles
  * around a unit, and physical separation caps how many units fit there.
  */
-const MAX_NEIGHBOURS = 256;
+const MAX_NEIGHBOURS = 512;
 
 export interface WorldOptions {
   mapTiles: number;
   seed: number;
+  /**
+   * Content set. Defaults to race #1.
+   *
+   * Injected rather than imported by the systems so that M5 can load content
+   * from files without touching a single line of simulation code -- and so a
+   * test can define three toy unit types instead of reasoning about balance.
+   */
+  types?: TypeTable;
 }
 
 export class World {
@@ -78,8 +126,24 @@ export class World {
   readonly spatial: SpatialHash;
   readonly flowFields = new FlowFieldCache();
   readonly rng: Rng;
+  readonly types: TypeTable;
+  readonly players = new PlayerState();
+  /** Derived, non-hashed output for the renderer. Cleared at the start of each tick. */
+  readonly events = new EventLog();
 
   tick = 0;
+
+  /**
+   * Shared scratch for spatial queries made outside the steering loop.
+   *
+   * Sized to the whole store: the systems that use it (nearest patch, nearest
+   * target) fail *silently and wrongly* on truncation rather than loudly, so
+   * the buffer is made large enough that truncation cannot happen.
+   */
+  readonly queryScratch = new Int32Array(MAX_ENTITIES);
+
+  /** Largest radius in the loaded content. Sizes neighbour queries. */
+  private readonly maxRadius: Fx;
 
   /** Steering output for the current tick; scratch, not part of world state. */
   private readonly stepX = new Int32Array(MAX_ENTITIES);
@@ -93,6 +157,17 @@ export class World {
     // enough that each cell holds a handful of units rather than a crowd.
     this.spatial = new SpatialHash(options.mapTiles, 2, MAX_ENTITIES);
     this.rng = new Rng(options.seed);
+    this.types = options.types ?? defaultTypes;
+
+    // Derived from content rather than hardcoded. A neighbour query must cover
+    // the largest thing that could be overlapping the querier, and a constant
+    // here would silently stop covering a Nexus the moment someone added a
+    // bigger building.
+    let widest = 0;
+    for (const type of this.types.all) {
+      if (type.radius > widest) widest = type.radius;
+    }
+    this.maxRadius = widest;
   }
 
   /**
@@ -101,13 +176,30 @@ export class World {
    * `commands` must already be in the order the arbiter finalised, identically
    * on every peer. The simulation does not sort or deduplicate them: that would
    * hide an ordering bug in the netcode rather than surfacing it as a desync.
+   *
+   * System order is fixed and matters for feel, not for correctness -- any
+   * order is equally deterministic, but this one means a unit produced this
+   * tick can move this tick, and a unit killed this tick does not get to fire.
    */
   step(commands: readonly Command[]): void {
+    this.events.clear();
+
     for (const command of commands) this.applyCommand(command);
 
     this.spatial.rebuild(this.entities);
+    runConstruction(this);
+    runProduction(this);
+    runEconomy(this);
+    runCombat(this);
+
+    // Combat and production both change who exists. Rebuild before steering so
+    // units do not separate against corpses or walk through a unit that was
+    // just placed.
+    this.spatial.rebuild(this.entities);
     this.computeSteering();
     this.applySteering();
+
+    recomputeSupplyAndDefeat(this);
 
     this.tick++;
   }
@@ -119,6 +211,7 @@ export class World {
     h = hashNumber(h, this.rng.state);
     h = hashNumber(h, this.grid.version);
     h = this.entities.hash(h);
+    h = this.players.hash(h);
     // The cost grid is hashed too: a peer that missed a building placement
     // would otherwise path differently while reporting a matching hash.
     for (let i = 0; i < this.grid.tiles.length; i++) {
@@ -128,47 +221,334 @@ export class World {
   }
 
   // -------------------------------------------------------------------------
+  // Grid helpers, shared with the systems
+  // -------------------------------------------------------------------------
+
+  /** Free the tiles a destroyed or cancelled building occupied. */
+  clearFootprint(anchorX: number, anchorY: number, footprint: number): void {
+    if (footprint <= 0) return;
+    this.grid.fillRect(anchorX, anchorY, footprint, footprint, TILE_WALKABLE);
+  }
+
+  /** Nearest walkable cell to a tile, or -1 within a bounded search. */
+  nearestOpenCell(tx: number, ty: number): number {
+    return nearestReachable(this.grid, tx, ty);
+  }
+
+  /**
+   * Place a structure directly, bypassing cost and builder checks.
+   *
+   * Used by map setup for starting bases and ore patches, and by the build
+   * command once it has validated everything. Keeping one path means a
+   * building placed by the map and one placed by a player are stamped into the
+   * grid identically -- a difference there is an invisible wall.
+   */
+  placeStructure(
+    typeId: number,
+    tileX: number,
+    tileY: number,
+    owner: number,
+    complete = true,
+  ): EntityId {
+    const type = this.types.get(typeId);
+    const span = type.footprint > 0 ? type.footprint : 1;
+
+    for (let y = tileY; y < tileY + span; y++) {
+      for (let x = tileX; x < tileX + span; x++) {
+        if (!this.grid.inBounds(x, y)) return NULL_ENTITY;
+      }
+    }
+
+    this.grid.fillRect(tileX, tileY, span, span, TILE_STRUCTURE);
+    const id = spawnTyped(
+      this.entities,
+      this.types,
+      typeId,
+      footprintCentre(tileX, span),
+      footprintCentre(tileY, span),
+      owner,
+    );
+    if (id === NULL_ENTITY) {
+      this.clearFootprint(tileX, tileY, span);
+      return NULL_ENTITY;
+    }
+
+    if (!complete) {
+      const i = entityIndex(id);
+      this.entities.buildRemaining[i] = type.buildTime;
+      // A foundation starts at a tenth of its final health, so an early rush
+      // can kill one before it finishes -- but never at zero, which would make
+      // it die to the placement itself.
+      this.entities.health[i] = Math.max(1, Math.ceil(type.maxHealth / 10));
+    }
+    return id;
+  }
+
+  // -------------------------------------------------------------------------
   // Commands
   // -------------------------------------------------------------------------
+
+  /**
+   * Whether this player may act on this entity.
+   *
+   * Ownership is enforced here rather than trusted from the sender. In a
+   * peer-hosted game the "server" is another player's browser, so a modified
+   * client could otherwise issue orders to enemy units.
+   */
+  private controls(index: number, playerId: number): boolean {
+    return this.entities.owner[index] === playerId && this.players.isValid(playerId);
+  }
 
   private applyCommand(command: Command): void {
     const store = this.entities;
 
-    if (command.kind === CMD_STOP) {
-      for (const id of command.entities) {
-        if (!store.isAlive(id)) continue;
-        const i = entityIndex(id);
-        // Ownership is enforced here rather than trusted from the sender. In a
-        // peer-hosted game the "server" is another player's browser, so a
-        // modified client could otherwise issue orders to enemy units.
-        if (store.owner[i] !== command.playerId) continue;
-        store.orderKind[i] = ORDER_NONE;
-        store.flowGoal[i] = -1;
-        store.settled[i] = 1;
+    switch (command.kind) {
+      case CMD_STOP:
+      case CMD_HOLD: {
+        const hold = command.kind === CMD_HOLD;
+        for (const id of command.entities) {
+          const i = store.indexOfLive(id);
+          if (i < 0 || !this.controls(i, command.playerId)) continue;
+          store.orderKind[i] = hold ? ORDER_HOLD : ORDER_NONE;
+          store.flowGoal[i] = -1;
+          store.targetId[i] = NULL_ENTITY;
+          store.gatherTimer[i] = 0;
+          store.settled[i] = 1;
+        }
+        return;
       }
+
+      case CMD_MOVE:
+      case CMD_ATTACK_MOVE: {
+        const goalCell = this.resolveGoal(command.targetX, command.targetY);
+        if (goalCell < 0) return;
+        const order = command.kind === CMD_MOVE ? ORDER_MOVE : ORDER_ATTACK_MOVE;
+
+        for (const id of command.entities) {
+          const i = store.indexOfLive(id);
+          if (i < 0 || !this.controls(i, command.playerId)) continue;
+          if (store.moveSpeed[i] === 0) continue;
+          store.orderKind[i] = order;
+          store.orderX[i] = command.targetX;
+          store.orderY[i] = command.targetY;
+          store.flowGoal[i] = goalCell;
+          store.targetId[i] = NULL_ENTITY;
+          store.gatherTimer[i] = 0;
+          store.settled[i] = 0;
+        }
+        return;
+      }
+
+      case CMD_ATTACK: {
+        const ti = store.indexOfLive(command.target);
+        if (ti < 0) return;
+        if (this.types.get(store.typeId[ti]).kind === KIND_RESOURCE) return;
+
+        for (const id of command.entities) {
+          const i = store.indexOfLive(id);
+          if (i < 0 || !this.controls(i, command.playerId)) continue;
+          if (!isHostile(store.owner[i], store.owner[ti])) continue;
+          store.orderKind[i] = ORDER_ATTACK;
+          store.targetId[i] = command.target;
+          store.settled[i] = 0;
+          walkTo(this, i, store.posX[ti], store.posY[ti]);
+        }
+        return;
+      }
+
+      case CMD_GATHER: {
+        const ni = store.indexOfLive(command.target);
+        if (ni < 0) return;
+        if (this.types.get(store.typeId[ni]).kind !== KIND_RESOURCE) return;
+
+        for (const id of command.entities) {
+          const i = store.indexOfLive(id);
+          if (i < 0 || !this.controls(i, command.playerId)) continue;
+          if (!this.types.can(store.typeId[i], CAN_GATHER)) continue;
+          // A drone already holding a full load walks it home first rather
+          // than dropping it, which is what a player expects when they
+          // re-task a harvester mid-trip.
+          const full = store.cargo[i] >= this.types.get(store.typeId[i]).cargoCapacity;
+          store.orderKind[i] = full ? ORDER_RETURN : ORDER_GATHER;
+          store.targetId[i] = command.target;
+          store.gatherTimer[i] = 0;
+          store.settled[i] = 0;
+        }
+        return;
+      }
+
+      case CMD_BUILD:
+        this.applyBuild(command);
+        return;
+
+      case CMD_TRAIN: {
+        const bi = store.indexOfLive(command.building);
+        if (bi < 0 || !this.controls(bi, command.playerId)) return;
+        if (store.buildRemaining[bi] > 0) return;
+        if (!this.types.can(store.typeId[bi], CAN_PRODUCE)) return;
+        if (!this.types.has(command.unitType)) return;
+        if (!this.types.get(store.typeId[bi]).produces.includes(command.unitType)) return;
+
+        const unit = this.types.get(command.unitType);
+        const player = command.playerId;
+
+        if (store.queueLen[bi] >= 5) {
+          this.blocked(player, BLOCKED_QUEUE_FULL, command.unitType);
+          return;
+        }
+        // Supply is checked before the charge, so a blocked order costs
+        // nothing. The totals were recomputed at the end of the previous tick,
+        // which is exactly the state the player was looking at when they clicked.
+        if (this.players.supplyUsed[player] + unit.supplyCost > this.players.supplyCap[player]) {
+          this.blocked(player, BLOCKED_SUPPLY, command.unitType);
+          return;
+        }
+        if (!this.players.spend(player, unit.costAlloy, unit.costPlasma)) {
+          this.blocked(player, BLOCKED_RESOURCES, command.unitType);
+          return;
+        }
+        if (!store.enqueue(bi, command.unitType)) {
+          this.players.refund(player, unit.costAlloy, unit.costPlasma);
+          this.blocked(player, BLOCKED_QUEUE_FULL, command.unitType);
+        }
+        return;
+      }
+
+      case CMD_CANCEL_TRAIN: {
+        const bi = store.indexOfLive(command.building);
+        if (bi < 0 || !this.controls(bi, command.playerId)) return;
+        const len = store.queueLen[bi];
+        if (len === 0) return;
+        const position = command.position < 0 ? len - 1 : command.position;
+        if (position >= len) return;
+
+        const removed = store.dequeueAt(bi, position);
+        if (this.types.has(removed)) {
+          const unit = this.types.get(removed);
+          this.players.refund(command.playerId, unit.costAlloy, unit.costPlasma);
+        }
+        // Cancelling the item in progress abandons its progress too, which is
+        // the standard rule and stops a queue from being used as free storage.
+        if (position === 0) store.produceRemaining[bi] = 0;
+        return;
+      }
+
+      case CMD_RALLY: {
+        for (const id of command.entities) {
+          const i = store.indexOfLive(id);
+          if (i < 0 || !this.controls(i, command.playerId)) continue;
+          if (!this.types.can(store.typeId[i], CAN_PRODUCE)) continue;
+          store.rallyX[i] = command.targetX;
+          store.rallyY[i] = command.targetY;
+        }
+        return;
+      }
+    }
+  }
+
+  /** Validate and place a construction site, then send the builders to it. */
+  private applyBuild(command: BuildCommand): void {
+    const store = this.entities;
+    const player = command.playerId;
+    if (!this.players.isValid(player)) return;
+    if (!this.types.has(command.buildingType)) return;
+
+    const type = this.types.get(command.buildingType);
+    if (type.kind !== KIND_BUILDING) return;
+
+    // At least one live builder the player actually controls. Without this a
+    // modified client could place buildings with no drone anywhere near.
+    let hasBuilder = false;
+    for (const id of command.entities) {
+      const i = store.indexOfLive(id);
+      if (i < 0 || !this.controls(i, player)) continue;
+      if (!this.types.can(store.typeId[i], CAN_BUILD)) continue;
+      if (!this.types.get(store.typeId[i]).builds.includes(command.buildingType)) continue;
+      hasBuilder = true;
+      break;
+    }
+    if (!hasBuilder) return;
+
+    const span = type.footprint > 0 ? type.footprint : 1;
+    const tileX = command.tileX | 0;
+    const tileY = command.tileY | 0;
+
+    // An Extractor replaces the vent it is built on, so its footprint check is
+    // "is there a vent here" rather than "are these tiles clear" -- the vent
+    // itself blocks them.
+    let ventIndex = -1;
+    if ((type.abilities & NEEDS_VENT) !== 0) {
+      ventIndex = this.ventAt(tileX, tileY, span);
+      if (ventIndex < 0) {
+        this.blocked(player, BLOCKED_SPACE, command.buildingType);
+        return;
+      }
+    } else if (!this.areaClear(tileX, tileY, span)) {
+      this.blocked(player, BLOCKED_SPACE, command.buildingType);
       return;
     }
 
-    if (command.kind === CMD_MOVE) {
-      const tx = worldToTile(command.targetX);
-      const ty = worldToTile(command.targetY);
+    if (!this.players.spend(player, type.costAlloy, type.costPlasma)) {
+      this.blocked(player, BLOCKED_RESOURCES, command.buildingType);
+      return;
+    }
 
-      // Clicking a cliff or a building is extremely common; nudge the order to
-      // the nearest reachable tile instead of silently discarding it.
-      const goalCell = nearestReachable(this.grid, tx, ty);
-      if (goalCell < 0) return;
+    // Only now is the vent consumed. Removing it before the affordability
+    // check would destroy the vent on a failed placement.
+    if (ventIndex >= 0) killEntity(this, ventIndex);
 
-      for (const id of command.entities) {
-        if (!store.isAlive(id)) continue;
-        const i = entityIndex(id);
-        if (store.owner[i] !== command.playerId) continue;
-        store.orderKind[i] = ORDER_MOVE;
-        store.orderX[i] = command.targetX;
-        store.orderY[i] = command.targetY;
-        store.flowGoal[i] = goalCell;
-        store.settled[i] = 0;
+    const site = this.placeStructure(command.buildingType, tileX, tileY, player, false);
+    if (site === NULL_ENTITY) {
+      this.players.refund(player, type.costAlloy, type.costPlasma);
+      this.blocked(player, BLOCKED_SPACE, command.buildingType);
+      return;
+    }
+
+    for (const id of command.entities) {
+      const i = store.indexOfLive(id);
+      if (i < 0 || !this.controls(i, player)) continue;
+      if (!this.types.can(store.typeId[i], CAN_BUILD)) continue;
+      store.orderKind[i] = ORDER_BUILD;
+      store.targetId[i] = site;
+      store.gatherTimer[i] = 0;
+      store.settled[i] = 0;
+      walkTo(this, i, store.posX[entityIndex(site)], store.posY[entityIndex(site)]);
+    }
+  }
+
+  /** Every tile of a prospective footprint is in bounds and walkable. */
+  private areaClear(tileX: number, tileY: number, span: number): boolean {
+    for (let y = tileY; y < tileY + span; y++) {
+      for (let x = tileX; x < tileX + span; x++) {
+        if (!this.grid.inBounds(x, y) || this.grid.isBlocked(x, y)) return false;
       }
     }
+    return true;
+  }
+
+  /** A geothermal vent whose footprint exactly matches this placement, or -1. */
+  private ventAt(tileX: number, tileY: number, span: number): number {
+    const store = this.entities;
+    const wantX = footprintCentre(tileX, span);
+    const wantY = footprintCentre(tileY, span);
+    for (let i = 0; i < store.highWater; i++) {
+      if (store.alive[i] !== 1) continue;
+      const type = this.types.get(store.typeId[i]);
+      if (type.kind !== KIND_RESOURCE || type.resourceAmount !== 0) continue;
+      if (store.posX[i] === wantX && store.posY[i] === wantY) return i;
+    }
+    return -1;
+  }
+
+  private blocked(player: number, reason: number, typeId: number): void {
+    this.events.push({ kind: EV_BLOCKED, player, reason, typeId });
+  }
+
+  /** Snap an order point to a reachable tile, nudging off cliffs and buildings. */
+  private resolveGoal(x: Fx, y: Fx): number {
+    // Clicking a cliff or a building is extremely common; nudge the order to
+    // the nearest reachable tile instead of silently discarding it.
+    return nearestReachable(this.grid, worldToTile(x), worldToTile(y));
   }
 
   // -------------------------------------------------------------------------
@@ -191,11 +571,22 @@ export class World {
       this.stepX[i] = 0;
       this.stepY[i] = 0;
       if (store.alive[i] !== 1) continue;
+      // Buildings and ore patches are obstacles, not participants. They still
+      // appear in every other unit's neighbour query -- they just never move,
+      // which is why a Nexus cannot be shoved out of its own footprint.
+      if (moveSpeed[i] === 0) continue;
 
       let dx = 0;
       let dy = 0;
       let distToGoal = 0;
-      const hasOrder = orderKind[i] === ORDER_MOVE;
+      const kind = orderKind[i];
+      const hasOrder =
+        kind === ORDER_MOVE ||
+        kind === ORDER_ATTACK_MOVE ||
+        kind === ORDER_ATTACK ||
+        kind === ORDER_GATHER ||
+        kind === ORDER_RETURN ||
+        kind === ORDER_BUILD;
 
       if (hasOrder) {
         const toGoalX = orderX[i] - posX[i];
@@ -203,8 +594,13 @@ export class World {
         distToGoal = fxLength(toGoalX, toGoalY);
 
         if (distToGoal <= ARRIVAL_RADIUS) {
-          orderKind[i] = ORDER_NONE;
-          flowGoal[i] = -1;
+          // Only a plain move ends on arrival. The working orders own their own
+          // completion -- a drone that reached its patch has *started* mining,
+          // not finished its job, and clearing the order here would drop it.
+          if (kind === ORDER_MOVE || kind === ORDER_ATTACK_MOVE) {
+            orderKind[i] = ORDER_NONE;
+            flowGoal[i] = -1;
+          }
           settled[i] = 1;
         } else {
           const goal = flowGoal[i];
@@ -245,7 +641,7 @@ export class World {
       // Query only as far as an overlap could physically reach. A fixed, larger
       // radius returns a crowd of irrelevant units, which is both wasted work
       // and the thing that used to overflow the neighbour buffer.
-      const queryTiles = (((radius[i] + MAX_UNIT_RADIUS) >> 16) | 0) + 1;
+      const queryTiles = (((radius[i] + this.maxRadius) >> 16) | 0) + 1;
       const count = this.spatial.queryInto(posX[i], posY[i], queryTiles, this.neighbours);
       // Shallow overlaps are damped for settled units so formations come to
       // rest. Deep overlaps are never damped -- see the comment below.
@@ -314,10 +710,15 @@ export class World {
       // already-settled unit settles too. The effect cascades outward from the
       // first arrival, so a formation comes to rest instead of churning.
       //
+      // Only plain moves settle this way. A harvester or builder pressed
+      // against a crowd must keep pushing toward its patch or its site, or a
+      // busy base would quietly stall its own economy.
+      //
       // This reads `settled` for neighbours while writing it for the current
       // entity, so it is order-dependent -- but iteration is strictly by
       // ascending index, so it is order-dependent *identically on every peer*.
-      if (hasOrder && blockedBySettled && distToGoal <= SETTLE_NEAR_GOAL) {
+      const settleable = kind === ORDER_MOVE || kind === ORDER_ATTACK_MOVE;
+      if (settleable && blockedBySettled && distToGoal <= SETTLE_NEAR_GOAL) {
         orderKind[i] = ORDER_NONE;
         flowGoal[i] = -1;
         settled[i] = 1;

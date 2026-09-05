@@ -2,10 +2,12 @@ import type { GuestSession, HostSession } from "@rts/netcode";
 import { TICK_HZ, TICK_MS, hashToString, type Command, type World } from "@rts/sim";
 import * as THREE from "three";
 import { CameraControls } from "./camera-controls.js";
+import { Effects } from "./effects.js";
+import { Hud } from "./hud.js";
 import { CAMERA_DISTANCE, IsoCamera } from "./iso-camera.js";
 import { Selection } from "./selection.js";
 import { TerrainRenderer } from "./terrain-renderer.js";
-import { UnitRenderer } from "./units-renderer.js";
+import { WorldRenderer } from "./world-renderer.js";
 
 /**
  * The running match: renderer, input, and the loop that drives the session.
@@ -86,17 +88,39 @@ export function startGame(options: GameOptions): RunningGame {
   scene.add(grid);
 
   const terrain = new TerrainRenderer(scene);
-  const units = new UnitRenderer(scene, 1024);
+  const units = new WorldRenderer(scene, rig.camera);
+  const effects = new Effects(scene);
   const selection = new Selection(world, rig, canvas, localPlayer, (command: Command) =>
     session.submitLocal(command),
   );
+  const hud = new Hud(world, localPlayer, selection, (command: Command) =>
+    session.submitLocal(command),
+  );
+
+  // Translucent footprint preview shown while placing a building.
+  const ghost = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0),
+    new THREE.MeshBasicMaterial({ color: 0x7dffb0, transparent: true, opacity: 0.35 }),
+  );
+  ghost.visible = false;
+  scene.add(ghost);
+
+  // Interpolation needs the pre-step transforms, and effects need the events
+  // that a step produced -- both per tick, not per frame. A renderer that
+  // sampled after `update()` would miss every tick but the last of a catch-up
+  // burst, which is exactly when the most is happening.
+  session.onBeforeTick = (w) => units.capturePrevious(w);
+  session.onAfterTick = (w) => {
+    effects.ingest(w);
+    hud.ingest(w);
+  };
 
   // Frame the player's own units, so a guest does not open looking at empty map.
   centreOnPlayerUnits(world, localPlayer, rig, mapTiles);
 
   // ---------------------------------------------------------------------------
 
-  const hud = document.querySelector<HTMLDivElement>("#hud")!;
+  const debug = document.querySelector<HTMLDivElement>("#hud")!;
   let lastFrameMs = performance.now();
   let lastPumpMs = lastFrameMs;
   let framesThisSecond = 0;
@@ -138,9 +162,40 @@ export function startGame(options: GameOptions): RunningGame {
     if (running) pump(performance.now());
   }, TICK_MS / 2);
 
-  function renderFrame(): void {
+  function updateGhost(): void {
+    const tile = selection.ghostTile;
+    if (selection.buildType === 0 || !tile) {
+      ghost.visible = false;
+      return;
+    }
+    const type = world.types.get(selection.buildType);
+    const span = type.footprint;
+
+    let clear = true;
+    for (let y = tile.y; y < tile.y + span && clear; y++) {
+      for (let x = tile.x; x < tile.x + span; x++) {
+        if (!world.grid.inBounds(x, y) || world.grid.isBlocked(x, y)) {
+          clear = false;
+          break;
+        }
+      }
+    }
+
+    ghost.visible = true;
+    ghost.position.set(tile.x + span / 2, 0, tile.y + span / 2);
+    ghost.scale.set(span, span * 0.7, span);
+    // Green for a legal placement, red otherwise. Note that "clear" here is the
+    // client's own read of the grid; the simulation re-checks it when the
+    // command executes a few ticks later, and can still refuse.
+    (ghost.material as THREE.MeshBasicMaterial).color.setHex(clear ? 0x7dffb0 : 0xff7a59);
+  }
+
+  function renderFrame(deltaSeconds = 0): void {
     terrain.sync(world.grid);
     units.update(world, session.alpha, selection.selected);
+    effects.update(deltaSeconds);
+    updateGhost();
+    hud.update();
     renderer.render(scene, rig.camera);
 
     const peers = isHost
@@ -149,14 +204,17 @@ export function startGame(options: GameOptions): RunningGame {
         ? 1
         : 0;
 
-    hud.textContent =
+    // Hashing walks the whole world; once per frame, reused for both consumers.
+    const hash = hashToString(world.hash());
+
+    debug.textContent =
       `${fps} fps   tick ${world.tick} @ ${TICK_HZ}Hz   step ${lastStepMs.toFixed(2)}ms` +
-      `\n${world.entities.count} units   ${selection.selected.size} selected` +
+      `\n${world.entities.count} entities   ${selection.selected.size} selected` +
       `   ${isHost ? "hosting" : "guest"}   ${peers} peer${peers === 1 ? "" : "s"}` +
       (options.joinCode ? `   code ${options.joinCode}` : "") +
-      `\nhash ${hashToString(world.hash())}   player ${localPlayer}`;
+      `\nhash ${hash}   player ${localPlayer}`;
 
-    options.onStatus?.({ tick: world.tick, fps, peers, hash: hashToString(world.hash()) });
+    options.onStatus?.({ tick: world.tick, fps, peers, hash });
   }
 
   function frame(nowMs: number): void {
@@ -167,7 +225,7 @@ export function startGame(options: GameOptions): RunningGame {
 
     controls.update(deltaMs / 1000);
     pump(nowMs);
-    renderFrame();
+    renderFrame(deltaMs / 1000);
 
     framesThisSecond++;
     if (nowMs - fpsWindowStart >= 500) {
@@ -210,6 +268,7 @@ export function startGame(options: GameOptions): RunningGame {
       clearInterval(pumpTimer);
       controls.dispose();
       selection.dispose();
+      hud.dispose();
       window.removeEventListener("resize", resize);
     },
   };

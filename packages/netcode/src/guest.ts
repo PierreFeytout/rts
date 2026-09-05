@@ -45,6 +45,16 @@ export interface GuestOptions {
   onWelcome?: (playerId: number) => void;
   onReject?: (reason: string) => void;
   onResync?: (tick: number) => void;
+  /**
+   * Called immediately before each `world.step`, for renderers that snapshot
+   * pre-step transforms to interpolate between ticks.
+   */
+  onBeforeTick?: (world: World) => void;
+  /**
+   * Called immediately after each `world.step`, while `world.events` still
+   * holds that tick's events. They are cleared at the top of the next step.
+   */
+  onAfterTick?: (world: World) => void;
 }
 
 export class GuestSession {
@@ -59,6 +69,14 @@ export class GuestSession {
   private readonly onWelcome: GuestOptions["onWelcome"];
   private readonly onReject: GuestOptions["onReject"];
   private readonly onResync: GuestOptions["onResync"];
+  /**
+   * Renderer hooks. Public and mutable because the renderer is built *after*
+   * the session -- the lobby hands back a live session, and the match screen
+   * attaches to it. Making these constructor-only would force the lobby to
+   * know about interpolation.
+   */
+  onBeforeTick: GuestOptions["onBeforeTick"];
+  onAfterTick: GuestOptions["onAfterTick"];
 
   /** Received but not yet executed schedules, keyed by tick. */
   private readonly pending = new Map<number, Command[]>();
@@ -84,6 +102,8 @@ export class GuestSession {
     this.onWelcome = options.onWelcome;
     this.onReject = options.onReject;
     this.onResync = options.onResync;
+    this.onBeforeTick = options.onBeforeTick;
+    this.onAfterTick = options.onAfterTick;
 
     this.transport.on("message", this.handleMessage);
   }
@@ -165,7 +185,9 @@ export class GuestSession {
         break;
       }
       this.pending.delete(this.world.tick);
+      this.onBeforeTick?.(this.world);
       this.world.step(commands);
+      this.onAfterTick?.(this.world);
       executed++;
 
       if (this.world.tick % this.hashInterval === 0) {

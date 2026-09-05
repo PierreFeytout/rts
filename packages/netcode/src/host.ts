@@ -64,6 +64,15 @@ export interface HostOptions {
    * ticks one at a time and duplicate the scheduling logic.
    */
   onBeforeTick?: (world: World) => void;
+  /**
+   * Called immediately after each `world.step`, while `world.events` still
+   * holds that tick's events.
+   *
+   * Events are cleared at the top of the next step, so anything that wants
+   * muzzle flashes or death effects has to read them here. A caller that
+   * polled after `update()` would see only the last tick of a catch-up burst.
+   */
+  onAfterTick?: (world: World) => void;
 }
 
 interface PlayerSlot {
@@ -86,7 +95,14 @@ export class HostSession {
   private readonly hashInterval: number;
   private readonly hashHistory: number;
   private readonly onDesync: HostOptions["onDesync"];
-  private readonly onBeforeTick: HostOptions["onBeforeTick"];
+  /**
+   * Renderer hooks. Public and mutable because the renderer is built *after*
+   * the session -- the lobby hands back a live session, and the match screen
+   * attaches to it. Making these constructor-only would force the lobby to
+   * know about interpolation.
+   */
+  onBeforeTick: HostOptions["onBeforeTick"];
+  onAfterTick: HostOptions["onAfterTick"];
 
   /** Commands finalised for future ticks, keyed by tick. */
   private readonly scheduled = new Map<number, Command[]>();
@@ -108,6 +124,7 @@ export class HostSession {
     this.hashHistory = options.hashHistory ?? 300;
     this.onDesync = options.onDesync;
     this.onBeforeTick = options.onBeforeTick;
+    this.onAfterTick = options.onAfterTick;
 
     // The host always occupies player slot 0.
     this.slots.set(this.transport.localPeer, {
@@ -176,6 +193,7 @@ export class HostSession {
 
     this.onBeforeTick?.(this.world);
     this.world.step(commands);
+    this.onAfterTick?.(this.world);
 
     if (this.world.tick % this.hashInterval === 0) {
       this.hashes.set(this.world.tick, this.world.hash());

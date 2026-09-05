@@ -1,4 +1,21 @@
-import { CMD_MOVE, type Command, type EntityId, type World } from "@rts/sim";
+import {
+  CAN_BUILD,
+  CAN_GATHER,
+  CAN_PRODUCE,
+  CMD_ATTACK,
+  CMD_ATTACK_MOVE,
+  CMD_BUILD,
+  CMD_GATHER,
+  CMD_HOLD,
+  CMD_MOVE,
+  CMD_RALLY,
+  CMD_STOP,
+  KIND_RESOURCE,
+  NULL_ENTITY,
+  type Command,
+  type EntityId,
+  type World,
+} from "@rts/sim";
 import * as THREE from "three";
 import { simToWorld, worldToSim } from "./coords.js";
 import type { IsoCamera } from "./iso-camera.js";
@@ -7,19 +24,33 @@ import type { IsoCamera } from "./iso-camera.js";
  * Unit selection and order issuing.
  *
  * Emits commands rather than mutating the world directly. That separation is
- * deliberate and load-bearing for M2: once netcode lands, the same commands go
- * through the arbiter to be scheduled at a future tick instead of being applied
- * locally. Keeping input on the command path from the start means the netcode
- * has nothing to untangle.
+ * deliberate and load-bearing: commands go through the arbiter to be scheduled
+ * at a future tick rather than being applied locally, so anything that took a
+ * shortcut here would desync instantly.
+ *
+ * Right-click is *contextual* -- the same button means move, attack, gather or
+ * rally depending on what is under the cursor and what is selected. That is the
+ * genre convention and it is what keeps the command card optional rather than
+ * mandatory.
  */
 
 /** Pointer travel under this many pixels counts as a click, not a drag. */
 const DRAG_THRESHOLD_PX = 5;
-/** Radius in world units for a single-click pick. */
+/** Radius in world units for a single-click pick on a unit. */
 const CLICK_PICK_RADIUS = 0.65;
 
 export class Selection {
   readonly selected = new Set<EntityId>();
+
+  /** Type id being placed, or 0 when not in build mode. */
+  buildType = 0;
+  /** Anchor tile the build ghost is currently over, or null. */
+  ghostTile: { x: number; y: number } | null = null;
+  /** True while waiting for the player to click an attack-move destination. */
+  attackMovePending = false;
+
+  /** Fired whenever the selection or a pending mode changes. */
+  onChange: (() => void) | null = null;
 
   private readonly rig: IsoCamera;
   private readonly element: HTMLElement;
@@ -64,18 +95,35 @@ export class Selection {
     this.listen(element, "pointerdown", (e) => {
       const ev = e as PointerEvent;
       if (ev.button === 0) {
+        if (this.buildType !== 0) {
+          this.placeBuilding(ev.clientX, ev.clientY, ev.shiftKey);
+          return;
+        }
+        if (this.attackMovePending) {
+          this.issueAttackMove(ev.clientX, ev.clientY);
+          return;
+        }
         this.dragging = true;
         this.startX = this.currentX = ev.clientX;
         this.startY = this.currentY = ev.clientY;
         element.setPointerCapture(ev.pointerId);
       } else if (ev.button === 2) {
         ev.preventDefault();
-        this.issueMoveOrder(ev.clientX, ev.clientY);
+        // Right-click is also the universal "never mind" for a pending mode.
+        if (this.buildType !== 0 || this.attackMovePending) {
+          this.cancelPending();
+          return;
+        }
+        this.issueContextOrder(ev.clientX, ev.clientY);
       }
     });
 
     this.listen(element, "pointermove", (e) => {
       const ev = e as PointerEvent;
+      if (this.buildType !== 0) {
+        this.updateGhost(ev.clientX, ev.clientY);
+        return;
+      }
       if (!this.dragging) return;
       this.currentX = ev.clientX;
       this.currentY = ev.clientY;
@@ -97,11 +145,39 @@ export class Selection {
       } else {
         this.selectAt(ev.clientX, ev.clientY);
       }
+      this.changed();
     });
 
     this.listen(element, "pointercancel", () => {
       this.dragging = false;
       this.boxElement.style.display = "none";
+    });
+
+    this.listen(window, "keydown", (e) => {
+      const ev = e as KeyboardEvent;
+      // Never steal keys from a focused text field -- the join-code box lives
+      // on the same page.
+      const target = ev.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+
+      switch (ev.key.toLowerCase()) {
+        case "s":
+          this.issueToSelection(CMD_STOP);
+          break;
+        case "h":
+          this.issueToSelection(CMD_HOLD);
+          break;
+        case "a":
+          if (this.selected.size > 0) {
+            this.attackMovePending = true;
+            this.buildType = 0;
+            this.changed();
+          }
+          break;
+        case "escape":
+          this.cancelPending();
+          break;
+      }
     });
   }
 
@@ -112,12 +188,43 @@ export class Selection {
 
   /** Drop handles whose entities have died, so rings do not linger. */
   pruneDead(): void {
+    let removed = false;
     for (const id of this.selected) {
-      if (!this.world.entities.isAlive(id)) this.selected.delete(id);
+      if (!this.world.entities.isAlive(id)) {
+        this.selected.delete(id);
+        removed = true;
+      }
     }
+    if (removed) this.changed();
+  }
+
+  /** Enter building-placement mode. */
+  beginBuild(typeId: number): void {
+    this.buildType = typeId;
+    this.attackMovePending = false;
+    this.changed();
+  }
+
+  cancelPending(): void {
+    if (this.buildType === 0 && !this.attackMovePending) return;
+    this.buildType = 0;
+    this.attackMovePending = false;
+    this.ghostTile = null;
+    this.changed();
+  }
+
+  /** Replace the selection wholesale, e.g. from a HUD button. */
+  setSelection(ids: readonly EntityId[]): void {
+    this.selected.clear();
+    for (const id of ids) this.selected.add(id);
+    this.changed();
   }
 
   // -------------------------------------------------------------------------
+
+  private changed(): void {
+    this.onChange?.();
+  }
 
   private dragDistance(): number {
     return Math.hypot(this.currentX - this.startX, this.currentY - this.startY);
@@ -144,23 +251,60 @@ export class Selection {
     return this.raycaster.ray.intersectPlane(this.groundPlane, this.hit);
   }
 
+  /**
+   * Nearest entity of any owner under the cursor, or NULL_ENTITY.
+   *
+   * Pick radius scales with footprint so a 4x4 Nexus is clickable across its
+   * whole face rather than only at the exact centre point.
+   */
+  private pickAny(clientX: number, clientY: number): EntityId {
+    const point = this.groundAt(clientX, clientY);
+    if (!point) return NULL_ENTITY;
+
+    const e = this.world.entities;
+    let best = NULL_ENTITY;
+    let bestScore = Infinity;
+
+    for (let i = 0; i < e.highWater; i++) {
+      if (e.alive[i] !== 1) continue;
+      const type = this.world.types.get(e.typeId[i]);
+      const reach = type.footprint > 0 ? type.footprint * 0.6 : CLICK_PICK_RADIUS;
+      const dx = simToWorld(e.posX[i]) - point.x;
+      const dz = simToWorld(e.posY[i]) - point.z;
+      const d = Math.hypot(dx, dz);
+      if (d > reach) continue;
+      // Normalised distance, so a small unit standing on a big building's
+      // footprint still wins the pick.
+      const score = d / reach;
+      if (score < bestScore) {
+        bestScore = score;
+        best = e.idAt(i);
+      }
+    }
+    return best;
+  }
+
   private selectAt(clientX: number, clientY: number): void {
     const point = this.groundAt(clientX, clientY);
     if (!point) return;
 
     const e = this.world.entities;
     let best: EntityId | null = null;
-    let bestDistSq = CLICK_PICK_RADIUS * CLICK_PICK_RADIUS;
+    let bestScore = Infinity;
 
     for (let i = 0; i < e.highWater; i++) {
       if (e.alive[i] !== 1 || e.owner[i] !== this.localPlayer) continue;
+      const type = this.world.types.get(e.typeId[i]);
+      const reach = type.footprint > 0 ? type.footprint * 0.6 : CLICK_PICK_RADIUS;
       const dx = simToWorld(e.posX[i]) - point.x;
       const dz = simToWorld(e.posY[i]) - point.z;
-      const d = dx * dx + dz * dz;
+      const d = Math.hypot(dx, dz);
+      if (d > reach) continue;
       // Nearest wins, so overlapping units pick the one actually under the
       // cursor rather than whichever has the lowest slot index.
-      if (d < bestDistSq) {
-        bestDistSq = d;
+      const score = d / reach;
+      if (score < bestScore) {
+        bestScore = score;
         best = e.idAt(i);
       }
     }
@@ -180,6 +324,10 @@ export class Selection {
 
     for (let i = 0; i < e.highWater; i++) {
       if (e.alive[i] !== 1 || e.owner[i] !== this.localPlayer) continue;
+      // Dragging a box over your base should give you the army in it, not the
+      // buildings under it -- selecting a Nexus by accident and then issuing a
+      // move order silently does nothing.
+      if (e.moveSpeed[i] === 0) continue;
 
       // Project to screen space rather than intersecting a frustum: at this
       // unit count it is cheap, and it matches exactly what the player sees.
@@ -195,18 +343,151 @@ export class Selection {
     }
   }
 
-  private issueMoveOrder(clientX: number, clientY: number): void {
+  // -- orders ---------------------------------------------------------------
+
+  /** Selected entities that can be given a movement order. */
+  private mobile(): EntityId[] {
+    const out: EntityId[] = [];
+    for (const id of this.selected) {
+      const i = this.world.entities.indexOfLive(id);
+      if (i >= 0 && this.world.entities.moveSpeed[i] > 0) out.push(id);
+    }
+    return out;
+  }
+
+  /** Selected buildings that produce units, for rally points. */
+  private producers(): EntityId[] {
+    const out: EntityId[] = [];
+    for (const id of this.selected) {
+      const i = this.world.entities.indexOfLive(id);
+      if (i < 0) continue;
+      if (this.world.types.can(this.world.entities.typeId[i], CAN_PRODUCE)) out.push(id);
+    }
+    return out;
+  }
+
+  private issueToSelection(kind: typeof CMD_STOP | typeof CMD_HOLD): void {
+    const entities = this.mobile();
+    if (entities.length === 0) return;
+    this.emit({ kind, playerId: this.localPlayer, entities });
+  }
+
+  /**
+   * Right-click: work out what the player meant from what is under the cursor.
+   *
+   * Order of preference is deliberate. Attacking an enemy beats everything;
+   * harvesting a patch beats walking onto it; and a rally point is only ever
+   * inferred for buildings, which cannot move anyway.
+   */
+  private issueContextOrder(clientX: number, clientY: number): void {
     if (this.selected.size === 0) return;
     const point = this.groundAt(clientX, clientY);
     if (!point) return;
 
+    const targetX = worldToSim(point.x);
+    const targetY = worldToSim(point.z);
+    const movers = this.mobile();
+    const producers = this.producers();
+
+    if (producers.length > 0) {
+      this.emit({ kind: CMD_RALLY, playerId: this.localPlayer, entities: producers, targetX, targetY });
+    }
+    if (movers.length === 0) return;
+
+    const target = this.pickAny(clientX, clientY);
+    const ti = this.world.entities.indexOfLive(target);
+
+    if (ti >= 0) {
+      const owner = this.world.entities.owner[ti];
+      const type = this.world.types.get(this.world.entities.typeId[ti]);
+
+      if (owner >= 0 && owner !== this.localPlayer) {
+        this.emit({ kind: CMD_ATTACK, playerId: this.localPlayer, entities: movers, target });
+        return;
+      }
+
+      if (type.kind === KIND_RESOURCE && type.resourceAmount > 0) {
+        const gatherers = movers.filter((id) => {
+          const i = this.world.entities.indexOfLive(id);
+          return i >= 0 && this.world.types.can(this.world.entities.typeId[i], CAN_GATHER);
+        });
+        if (gatherers.length > 0) {
+          this.emit({ kind: CMD_GATHER, playerId: this.localPlayer, entities: gatherers, target });
+          // Anything in the selection that cannot mine still walks over, so a
+          // mixed selection does not half-ignore the order.
+          const rest = movers.filter((id) => !gatherers.includes(id));
+          if (rest.length > 0) {
+            this.emit({ kind: CMD_MOVE, playerId: this.localPlayer, entities: rest, targetX, targetY });
+          }
+          return;
+        }
+      }
+    }
+
+    this.emit({ kind: CMD_MOVE, playerId: this.localPlayer, entities: movers, targetX, targetY });
+  }
+
+  private issueAttackMove(clientX: number, clientY: number): void {
+    const entities = this.mobile();
+    this.attackMovePending = false;
+    this.changed();
+    if (entities.length === 0) return;
+    const point = this.groundAt(clientX, clientY);
+    if (!point) return;
+
     this.emit({
-      kind: CMD_MOVE,
+      kind: CMD_ATTACK_MOVE,
       playerId: this.localPlayer,
-      entities: [...this.selected],
+      entities,
       targetX: worldToSim(point.x),
       targetY: worldToSim(point.z),
     });
+  }
+
+  // -- construction ---------------------------------------------------------
+
+  /** Anchor tile for the footprint centred on a screen point. */
+  private anchorTileAt(clientX: number, clientY: number): { x: number; y: number } | null {
+    const point = this.groundAt(clientX, clientY);
+    if (!point || this.buildType === 0) return null;
+    const span = this.world.types.get(this.buildType).footprint;
+    return {
+      x: Math.floor(point.x - span / 2 + 0.5),
+      y: Math.floor(point.z - span / 2 + 0.5),
+    };
+  }
+
+  private updateGhost(clientX: number, clientY: number): void {
+    this.ghostTile = this.anchorTileAt(clientX, clientY);
+  }
+
+  private placeBuilding(clientX: number, clientY: number, keepPlacing: boolean): void {
+    const anchor = this.anchorTileAt(clientX, clientY);
+    const buildingType = this.buildType;
+    if (!anchor) return;
+
+    const builders: EntityId[] = [];
+    for (const id of this.selected) {
+      const i = this.world.entities.indexOfLive(id);
+      if (i < 0) continue;
+      if (!this.world.types.can(this.world.entities.typeId[i], CAN_BUILD)) continue;
+      builders.push(id);
+    }
+
+    if (builders.length > 0) {
+      this.emit({
+        kind: CMD_BUILD,
+        playerId: this.localPlayer,
+        entities: builders,
+        buildingType,
+        tileX: anchor.x,
+        tileY: anchor.y,
+      });
+    }
+
+    // Shift keeps the ghost up for a row of pylons; otherwise one click, one
+    // building, which is what a player expects by default.
+    if (!keepPlacing) this.cancelPending();
   }
 
   private listen(target: EventTarget, type: string, handler: (e: Event) => void): void {
