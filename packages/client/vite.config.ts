@@ -5,6 +5,7 @@ import { capturePlugin } from "./vite-plugin-capture.js";
 const captureDir = fileURLToPath(new URL("../../.captures", import.meta.url));
 
 export default defineConfig({
+  base: "./",
   plugins: [capturePlugin(captureDir)],
   resolve: {
     alias: {
@@ -20,8 +21,14 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // Bind all interfaces so a second device on the LAN can join during
-    // multiplayer testing in M3.
+    // Bind all interfaces so a second machine on the LAN can load the dev
+    // client and join a game hosted from the desktop app.
     host: true,
+  },
+  build: {
+    // Electron loads the built files from disk with `loadFile`, so asset URLs
+    // must be relative. Absolute ones resolve against the filesystem root and
+    // silently load nothing.
+    assetsDir: "assets",
   },
 });

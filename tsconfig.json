@@ -20,7 +20,7 @@
       "path": "./packages/client"
     },
     {
-      "path": "./packages/signaling"
+      "path": "./packages/desktop"
     }
   ]
 }

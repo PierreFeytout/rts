@@ -1,29 +1,27 @@
 import { defaultContent } from "@rts/content";
 import { GuestSession } from "@rts/netcode";
 import type { World } from "@rts/sim";
-import { SignalingClient, WebRtcTransport, type PeerDiagnostic } from "@rts/transport";
-import { iceServers } from "./ice.js";
+import { HOST_PEER, SocketTransport, type PeerId } from "@rts/transport";
 
 /**
- * Joining a match as a guest, in one reusable piece.
+ * Opening a connection to a host, in one reusable piece.
  *
- * Extracted from the lobby because it has to happen twice: once when the player
- * types the code, and again every time the connection drops. Those two paths
- * being the same code is what stops reconnect from being a subtly different,
+ * Used for the initial join and for every reconnect after a drop. Those two
+ * being the same code is what stops reconnect from becoming a subtly different,
  * less-tested version of joining.
  *
- * Each attempt builds a **fresh** signaling client. Reusing the old one looks
- * tempting and is wrong twice over: the broker assigns a room per socket and
- * refuses a second join on the same one, and the reason the connection dropped
- * may well be that the broker itself went away.
+ * There is no signalling step any more. The host's machine is listening on a
+ * port and the address is the address -- which is the whole point of the
+ * desktop build: nothing is deployed anywhere, and the player who creates the
+ * game is the one running it.
  */
 
 /** How long to wait for the whole handshake before calling an attempt failed. */
-const ATTEMPT_TIMEOUT_MS = 20000;
+const ATTEMPT_TIMEOUT_MS = 15000;
 
 export interface JoinOptions {
-  brokerUrl: string;
-  code: string;
+  /** `ws://host:port`, or a bare `host:port` which is normalised. */
+  address: string;
   /**
    * The world to restore into.
    *
@@ -36,102 +34,134 @@ export interface JoinOptions {
   token: string;
   name: string;
   onStatus?: (message: string) => void;
-  onDiagnostics?: (list: PeerDiagnostic[]) => void;
 }
 
 export interface GuestConnection {
-  signaling: SignalingClient;
-  transport: WebRtcTransport;
+  transport: SocketTransport;
   session: GuestSession;
   playerId: number;
 }
 
 /**
- * Run one join attempt to completion.
+ * Turn whatever the player typed into a URL.
  *
- * Resolves once the host's welcome has arrived and the world has been restored;
- * rejects on refusal, on a signaling error, or on timeout. Everything it
- * created is torn down before it rejects, so a caller retrying in a loop cannot
- * leak a socket per attempt.
+ * People type `192.168.1.7`, `192.168.1.7:47654`, or paste the whole thing.
+ * Refusing any of those on principle would be pedantry, since every one of them
+ * says exactly what was meant.
+ */
+export function normaliseAddress(input: string, defaultPort = 47654): string {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) return "";
+  const withScheme = /^wss?:\/\//i.test(trimmed) ? trimmed : `ws://${trimmed}`;
+  try {
+    const url = new URL(withScheme);
+    if (!url.port) url.port = String(defaultPort);
+    // Path and query mean nothing here and are almost always a paste accident.
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Open a socket and wait for the relay to assign a peer id.
+ *
+ * The id has to arrive before anything is built on top: a session constructed
+ * against a transport that does not yet know whether it is the host would route
+ * every message to nobody.
+ */
+export function openTransport(address: string): Promise<SocketTransport> {
+  return new Promise((resolve, reject) => {
+    const url = normaliseAddress(address);
+    if (!url) {
+      reject(new Error("that does not look like an address"));
+      return;
+    }
+
+    let settled = false;
+    const socket = new WebSocket(url);
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      socket.close();
+      reject(new Error(`no answer from ${url.replace(/^ws:\/\//, "")}`));
+    }, ATTEMPT_TIMEOUT_MS);
+
+    const transport = new SocketTransport({
+      socket: socket as unknown as ConstructorParameters<typeof SocketTransport>[0]["socket"],
+      onReady: () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(transport);
+      },
+      onRejected: (reason) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        reject(new Error(reason));
+      },
+    });
+
+    socket.onerror = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      // The browser deliberately withholds the reason for a failed WebSocket
+      // connection, so this is as specific as it can honestly be.
+      reject(new Error(`could not reach ${url.replace(/^ws:\/\//, "")}`));
+    };
+  });
+}
+
+/**
+ * Join a match and wait for the host's welcome.
+ *
+ * Rejects on refusal or timeout, tearing down everything it created first, so a
+ * caller retrying in a loop cannot leak a socket per attempt.
  */
 export async function joinMatch(options: JoinOptions): Promise<GuestConnection> {
-  // Resolved before the socket opens, so the peer connection is created with
-  // the relay already configured. Adding ICE servers after negotiation has
-  // started does not apply to it.
-  const ice = await iceServers(options.brokerUrl);
+  const say = (message: string): void => options.onStatus?.(message);
+  say("connecting...");
+
+  const transport = await openTransport(options.address);
+  if (transport.localPeer === HOST_PEER) {
+    // Peer 0 means the relay had no host yet: this player arrived at a machine
+    // that is listening but not playing. Joining as the arbiter of an empty
+    // match would be worse than saying so.
+    transport.close();
+    throw new Error("that address is listening but no game is running there");
+  }
 
   return new Promise<GuestConnection>((resolve, reject) => {
-    const say = (message: string): void => options.onStatus?.(message);
-    let transport: WebRtcTransport | null = null;
-    let session: GuestSession | null = null;
     let settled = false;
-
-    const cleanup = (): void => {
-      window.clearTimeout(timer);
-      session?.close();
-      transport?.close();
-      signaling.close();
-    };
+    const timer = window.setTimeout(() => fail("the host did not answer"), ATTEMPT_TIMEOUT_MS);
 
     const fail = (reason: string): void => {
       if (settled) return;
       settled = true;
-      cleanup();
+      window.clearTimeout(timer);
+      session.close();
+      transport.close();
       reject(new Error(reason));
     };
 
-    const timer = window.setTimeout(
-      () => fail("timed out waiting for the host"),
-      ATTEMPT_TIMEOUT_MS,
-    );
-
-    const signaling: SignalingClient = new SignalingClient({
-      url: options.brokerUrl,
-      onJoined: (_code, peerId) => {
-        say("connecting to the host directly...");
-        transport = new WebRtcTransport({
-          signaling,
-          localPeer: peerId,
-          isHost: false,
-          iceServers: ice,
-          onDiagnostic: () => options.onDiagnostics?.(transport?.diagnostics ?? []),
-        });
-
-        session = new GuestSession({
-          world: options.world,
-          transport,
-          name: options.name,
-          token: options.token,
-          contentHash: defaultContent.hash,
-          onWelcome: (playerId) => {
-            if (settled) return;
-            settled = true;
-            window.clearTimeout(timer);
-            // The signaling client stays open on success: the host needs it to
-            // relay ICE for any *other* player who joins later.
-            resolve({ signaling, transport: transport!, session: session!, playerId });
-          },
-          onReject: (reason) => fail(`host refused the connection: ${reason}`),
-        });
-
-        // The handshake can only start once the data channel is actually
-        // usable; the peer connection reaching "connected" is not enough.
-        transport.on("peerJoin", () => {
-          say("connected, joining the match...");
-          session?.connect();
-        });
+    const session = new GuestSession({
+      world: options.world,
+      transport,
+      name: options.name,
+      token: options.token,
+      contentHash: defaultContent.hash,
+      onWelcome: (playerId: PeerId) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve({ transport, session, playerId });
       },
-      onSignal: (from, payload) => transport?.handleSignal(from, payload),
-      onError: (code, reason) => fail(`${code}: ${reason}`),
-      onClosed: () => {
-        // Only meaningful before the data channel is up. Afterwards the broker
-        // is out of the loop entirely and its socket closing is expected.
-        if (!settled) fail("lost the lobby server before the match started");
-      },
+      onReject: (reason) => fail(`host refused the connection: ${reason}`),
     });
 
-    say("contacting the lobby server...");
-    signaling.connect();
-    signaling.join(options.code);
+    say("joining the match...");
+    session.connect();
   });
 }

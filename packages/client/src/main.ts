@@ -3,6 +3,7 @@ import { decodeReplay, encodeReplay, playReplay } from "@rts/netcode";
 import { enableDevChecks, runDeterminismScenario, type Command } from "@rts/sim";
 import { startGame, type RunningGame } from "./game.js";
 import { showLobby } from "./lobby.js";
+import type { HostInfo } from "./desktop.js";
 import { MAP_TILES, createEmptyWorld } from "./match.js";
 import { Reconnector } from "./reconnect.js";
 import { ReplayControls, downloadReplay } from "./replay-ui.js";
@@ -26,11 +27,10 @@ const game = startGame({
   localPlayer: setup.localPlayer,
   isHost: setup.isHost,
   mapTiles: MAP_TILES,
-  ...(setup.joinCode !== undefined ? { joinCode: setup.joinCode } : {}),
 });
 
-if (setup.joinCode && setup.isHost) {
-  showJoinCode(setup.joinCode);
+if (setup.hostInfo) {
+  showHostPanel(setup.hostInfo);
 }
 
 // Watching a recording: transport controls instead of a lobby, and no netcode
@@ -50,11 +50,10 @@ if (setup.replay) {
 // Guests survive a dropped connection. The host does not: there is nobody for
 // it to reconnect to, and its departure ends the match for everyone.
 if (setup.reconnect) {
-  const { brokerUrl, code, token, name, connection } = setup.reconnect;
+  const { address, token, name, connection } = setup.reconnect;
   const reconnector = new Reconnector(
     {
-      brokerUrl,
-      code,
+      address,
       token,
       name,
       world: setup.world,
@@ -72,38 +71,75 @@ if (setup.reconnect) {
 }
 
 /**
- * Persistent banner with the join code and a copy-link button.
+ * Persistent panel telling the host how to be reached.
  *
- * Deliberately not a one-off dialog: players routinely need the code again a
+ * Deliberately not a one-off dialog. Players routinely need the address again a
  * minute later when someone else wants in, and hunting for it is a bad moment
  * in an otherwise smooth flow.
+ *
+ * It shows both addresses because they answer different questions: the LAN one
+ * always works for someone in the same room, and the public one only works if
+ * the router cooperated. Showing only the public address would strand people on
+ * a LAN whose router refused; showing only the LAN one would look like internet
+ * play was unsupported.
  */
-function showJoinCode(code: string): void {
-  const link = `${location.origin}${location.pathname}?join=${encodeURIComponent(code)}`;
-  const banner = document.createElement("div");
-  banner.style.cssText =
+function showHostPanel(info: HostInfo): void {
+  const panel = document.createElement("div");
+  panel.style.cssText =
     "position:fixed;top:12px;right:12px;z-index:15;padding:10px 14px;border:1px solid #234;" +
-    "border-radius:6px;background:rgba(8,12,20,0.78);color:#8fe3ff;backdrop-filter:blur(4px);" +
-    "font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;text-align:right";
-  banner.innerHTML =
-    `<div style="color:#62809f">share this code</div>` +
-    `<div style="font-size:22px;letter-spacing:0.3em;margin:2px 0 6px">${code}</div>` +
-    `<button id="copy-link" style="border:1px solid #2f6f8f;border-radius:4px;background:#14283a;` +
-    `color:#cfe4ff;font:inherit;padding:4px 10px;cursor:pointer">copy link</button>`;
-  document.body.appendChild(banner);
+    "border-radius:6px;background:rgba(8,12,20,0.82);color:#cfe4ff;backdrop-filter:blur(4px);" +
+    "font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;text-align:right;" +
+    "max-width:340px";
 
-  const button = banner.querySelector<HTMLButtonElement>("#copy-link")!;
-  button.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(link);
-      button.textContent = "copied";
-    } catch {
-      // Clipboard access needs a secure context and can be refused outright.
-      // Selecting the link is a worse experience but always available.
-      button.textContent = link;
-    }
-    setTimeout(() => (button.textContent = "copy link"), 2000);
-  };
+  const rows: string[] = [];
+  if (info.publicAddress) {
+    rows.push(row("over the internet", info.publicAddress));
+  }
+  if (info.lanAddress) {
+    rows.push(row("on this network", info.lanAddress));
+  }
+  if (!info.forwarding.ok) {
+    // The honest version. A host whose router refused can still play on a LAN,
+    // and telling them exactly which port to forward is more use than a
+    // generic failure.
+    rows.push(
+      `<div style="margin-top:8px;color:#ffb4a0;text-align:left;white-space:normal">` +
+        `${escapeHtml(info.forwarding.detail)}</div>`,
+    );
+  }
+
+  panel.innerHTML = rows.join("");
+  document.body.appendChild(panel);
+
+  for (const button of panel.querySelectorAll<HTMLButtonElement>("button[data-copy]")) {
+    button.onclick = async () => {
+      const value = button.dataset.copy ?? "";
+      try {
+        await navigator.clipboard.writeText(value);
+        button.textContent = "copied";
+      } catch {
+        // Clipboard access needs a secure context and can be refused outright.
+        // Showing the value is a worse experience but always available.
+        button.textContent = value;
+      }
+      setTimeout(() => (button.textContent = "copy"), 1600);
+    };
+  }
+}
+
+function row(label: string, address: string): string {
+  return (
+    `<div style="margin-bottom:6px">` +
+    `<div style="color:#62809f;font-size:11px">${label}</div>` +
+    `<div style="font-size:15px;letter-spacing:0.06em">${escapeHtml(address)}` +
+    `<button data-copy="${escapeHtml(address)}" style="margin-left:8px;border:1px solid #2f6f8f;` +
+    `border-radius:4px;background:#14283a;color:#cfe4ff;font:inherit;padding:1px 8px;` +
+    `cursor:pointer">copy</button></div></div>`
+  );
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 }
 
 // ---------------------------------------------------------------------------

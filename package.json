@@ -17,17 +17,23 @@
     "test:watch": "vitest",
     "lint": "eslint packages",
     "typecheck": "tsc --build --force",
+    "build:preload": "tsc -p packages/desktop/tsconfig.preload.json",
     "build:client": "npm run build --workspace @rts/client",
-    "build:all": "tsc --build && npm run build:client",
-    "broker": "node packages/signaling/dist/server.js",
-    "serve": "npm run build:all && npm run broker"
+    "build:all": "tsc --build && npm run build:preload && npm run build:client",
+    "desktop": "npm run build:all && electron packages/desktop/dist/main.js",
+    "desktop:dev": "npm run build && npm run build:preload && electron packages/desktop/dist/main.js",
+    "package": "npm run build:all && electron-builder"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^10.10.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.69.0",
     "vite": "^8.2.2",
     "vitest": "^5.0.0"
-  }
+  },
+  "main": "packages/desktop/dist/main.js",
+  "description": "A futuristic 2.5D isometric RTS with peer-hosted multiplayer."
 }

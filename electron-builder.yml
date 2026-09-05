@@ -1,0 +1,59 @@
+# Packaging the desktop app.
+#
+# The output is one executable per platform. There is nothing to deploy
+# alongside it: the player who creates the game runs the listening socket in
+# their own process, and it dies when they close the window.
+
+appId: dev.rts.game
+productName: RTS
+copyright: ""
+
+directories:
+  output: release
+  buildResources: build
+
+# Only what the app loads at runtime. The whole toolchain -- TypeScript, Vite,
+# Electron itself, every test -- stays out, which is the difference between a
+# ~200 MB download and a ~600 MB one.
+files:
+  - packages/desktop/dist/**/*
+  - packages/desktop/package.json
+  - packages/client/dist/**/*
+  - packages/transport/dist/**/*
+  - packages/transport/package.json
+  - package.json
+  - "!**/*.map"
+  - "!**/*.d.ts"
+
+# npm workspaces link local packages by symlink; electron-builder has to follow
+# them or the app ships with an unresolvable `@rts/transport` import.
+buildDependenciesFromSource: false
+npmRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # The listening socket is what makes hosting work, so the installer should
+  # ask for the firewall exception rather than leaving the player to discover
+  # it when nobody can connect.
+  artifactName: "RTS-${version}-windows.${ext}"
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  category: public.app-category.games
+  artifactName: "RTS-${version}-mac-${arch}.${ext}"
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Game
+  artifactName: "RTS-${version}-linux.${ext}"

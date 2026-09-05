@@ -1,33 +1,41 @@
 # RTS
 
 A futuristic real-time strategy game. 2.5D isometric, peer-hosted multiplayer —
-the player who creates the game hosts it, with no dedicated server to deploy.
+everyone runs the same executable, and the player who creates the game hosts it.
+There is no server to deploy and no third party involved.
 
-**Status: M7 complete — the game is finished and deployable.** One container
-serves the client and the lobby, guests survive a dropped connection, and every
-match can be saved and watched back. Gather alloy, tap geothermal vents for plasma, build a base, train an
-army, and destroy your opponent. Peer-hosted: one player creates the game, gets
-a six-character code, and everyone else joins over a direct WebRTC connection
-with no dedicated server anywhere.
+**Status: M8 complete — it is a desktop game.** Click **Host a game**, send a
+friend your address, and play. Your machine opens the port and runs the match;
+closing the window ends it.
 
-Verified between two browser tabs playing a real match: the guest's harvesting,
-construction and production all executed in the host's authoritative world, and
-both peers hashed **byte-identically** at matched ticks with zero desyncs.
+Gather alloy, tap geothermal vents for plasma, build a base, train an army, and
+destroy your opponent. Two playable races, fog of war, a minimap, control
+groups, reconnect after a dropped connection, and a replay of every match.
 
 **The simulation has been verified bit-identical between Node v22.15 and
 Chrome 148** across 600 ticks — see "Cross-runtime determinism check" below.
+A real host-and-guest match over real sockets is part of the test suite, and
+ends with both worlds reporting the same hash and zero desyncs.
 
 ## Quick start
 
 ```bash
 npm install
-npm run serve      # build everything, then serve on http://localhost:8080
+npm run desktop    # build everything, then launch the game
 ```
 
-Open it, click **Host a game**, and share the six-character code. Friends open
-the same address, type the code, and they are in. There is no waiting room —
-guests join a match already in progress, because the welcome snapshot makes late
-joining the natural case.
+Click **Host a game**. The app opens a port, asks your router to forward it, and
+shows you two addresses: one for friends on your network and one for friends
+anywhere else. They paste it into **Join** and they are in.
+
+There is no waiting room — guests join a match already in progress, because the
+welcome snapshot makes late joining the natural case rather than a special one.
+
+To build installers:
+
+```bash
+npm run package    # writes to release/
+```
 
 **How to actually play:** pick a faction lineup, drag a box over your workers,
 right-click an amber ore crystal to start mining, then click a worker and use
@@ -41,12 +49,20 @@ is playing the Verdant Concord without configuring anything.
 For development, with hot reload:
 
 ```bash
-npm run build && npm run broker   # signaling on :8080
-npm run dev                       # client on :5173, finds the broker automatically
+npm run dev        # renderer on :5173, in a browser
+```
+
+A browser can join a game and watch replays but cannot host one — accepting
+incoming connections is the one thing it cannot do, and the reason this is a
+desktop application at all. To iterate on the shell itself:
+
+```bash
+npm run build && npm run build:preload
+RTS_DEV_SERVER=http://localhost:5173 npx electron packages/desktop/dist/main.js
 ```
 
 ```bash
-npm test           # 301 tests
+npm test           # 273 tests
 npm run typecheck
 npm run lint       # includes the determinism rules
 ```
@@ -83,7 +99,7 @@ mandatory.
 | `packages/transport` | `Transport` interface + in-memory virtual network. No DOM, no Node. |
 | `packages/protocol` | Wire messages and MessagePack codec |
 | `packages/netcode` | Host arbiter, guest session, replay. No DOM, no Node. |
-| `packages/signaling` | The one always-on process: WebSocket broker + static file server |
+| `packages/desktop` | The Electron shell: the window, and the listening socket |
 | `packages/client` | Vite + Three.js renderer, lobby, input |
 
 Inside `packages/sim`: `fixed` (Q16.16 math), `rng`, `clock` (tick pacing),
@@ -95,9 +111,11 @@ war), `commands`, `types` (the *shape* of content, and the damage matrix),
 `fixture-types` and `scenario` (the determinism fixture), and `world` (`step()`
 is the only mutator).
 
-Three packages deliberately avoid both DOM and Node types. That is what lets the
-identical arbiter run in the host's browser tab today and in a headless
-dedicated server later, with only the transport swapped.
+Four packages — `sim`, `content`, `protocol`, `netcode` — and `transport` too
+deliberately avoid both DOM and Node types. That constraint is what made this
+milestone cheap: moving from a browser tab to a desktop executable changed the
+transport and the lobby and touched nothing else. `packages/desktop` is the only
+place Node APIs are allowed, because it is the only place that owns a socket.
 
 `sim` depends on nothing; `content` depends on `sim`. The arrow points one way
 on purpose — the engine cannot import a race, so it is structurally impossible
@@ -204,47 +222,63 @@ between tick 300 and 400".
 
 ## Connecting players
 
-Three pieces, and it matters which is which when something fails:
+Two pieces, and no third party:
 
-1. **The signaling broker** (`packages/signaling`) — the only always-on process.
-   It holds a map of join code to host connection and relays WebRTC offers,
-   answers and ICE candidates between peers who cannot yet talk directly. It
-   never sees a game command. Rooms are capped, messages are rate limited, and a
-   guest may only address the host — one guest cannot signal another, so it can
-   neither spray strangers nor probe who else is in the room.
-2. **WebRTC DataChannels** — the actual gameplay path, ordered and fully
-   reliable. Lockstep requires reliability: a dropped position update is a
-   cosmetic glitch, a dropped command puts two players in different worlds
-   permanently.
-3. **STUN** — lets peers find their own public address and punch through most
-   home NATs with nobody configuring a router.
+1. **The relay** (`packages/transport/src/relay.ts`) runs inside the hosting
+   player's own process. It accepts connections, assigns peer ids, and forwards
+   frames. It reads a five-byte header to route and never looks at the payload,
+   so it cannot disagree with the simulation about anything — there is nothing
+   in there for it to disagree with.
+2. **One WebSocket per player**, including the host, whose game connects to its
+   own relay over loopback. That means one transport implementation rather than
+   a client one and a server one that have to agree, and it is why the host is
+   just another peer everywhere above this layer.
 
-**Once the DataChannel opens, the broker is irrelevant.** Verified by killing
-the broker process mid-match: the guest issued an order afterwards, it reached
-the host's authoritative log, all 40 units obeyed, and desyncs stayed at zero.
-If the broker goes down, running games are unaffected — you just cannot start
-new ones.
+Ordered, reliable delivery comes free with TCP. Lockstep requires it: a dropped
+position update is a cosmetic glitch, a dropped command puts two players in
+different worlds permanently.
 
-Roles are fixed and asymmetric — the host always offers, guests always answer —
-so none of WebRTC's "perfect negotiation" glare handling is needed. That
-machinery exists for peers that may both initiate at once, which cannot happen
-in a star topology.
+**The routing rule is the only security-relevant line in the relay:** a guest
+may address the host and nothing else. Without it a modified client could send
+tick schedules directly to another guest and split the match in two. The relay
+also refuses control frames from clients — only it may say who joined — and
+caps the player count, because player ids index fixed-size arrays in the
+simulation and a fifth would read past the end of every one of them.
 
-### When a connection fails
+### Being reachable
 
-The lobby distinguishes the failure modes, because they need different fixes and
-look identical to a player otherwise:
+This is the cost of having no server. Nothing is deployed anywhere, but the
+hosting player's machine has to be reachable, and home routers forward nothing
+by default.
 
-- *Cannot reach the lobby server* — the broker is down or the URL is wrong.
-- *No game with that code* — mistyped, or the host restarted.
-- ICE failure with only `host` candidates — STUN never returned a public
-  address.
-- ICE failure having seen `relay` — even a TURN relay did not help.
+The app tries to open the port itself, using **NAT-PMP** first and then
+**UPnP IGD**, both implemented directly in `packages/desktop/src/port-forward.ts`.
+The obvious npm packages for this depend on `request` — deprecated since 2020 —
+and on an `xml2js` old enough to have its own CVEs; shipping that inside a
+desktop binary is a worse trade than a few hundred lines of well-specified
+protocol with no dependencies.
 
-A relay is what gets symmetric-NAT players through, and one ships in the compose
-file — see "Deploying it" below. **WebRTC also requires a secure context**, so
-a deployed client must be served over HTTPS; `localhost` is exempt, which is why
-local testing works without one.
+Every failure path is soft. A router that refuses, or lies, or does not answer
+leaves the player with the LAN address, the exact port to forward by hand, and a
+game that still starts:
+
+```
+your router did not accept an automatic port opening (no reply from router;
+no UPnP router answered). Forward TCP port 47654 by hand, or play on a LAN.
+```
+
+The port is checkable without a friend to test against:
+
+```bash
+npm run build && node scripts/check-port-forward.mjs
+```
+
+### What the port exposes
+
+One thing: the lobby protocol. Anything that is not a WebSocket upgrade gets a
+flat `426` and a one-line explanation. The earlier browser build served the
+client over the same port; a player's home machine should not be a web server as
+well.
 
 ## The game
 
@@ -375,61 +409,23 @@ unit that can shoot further than it can see is blind inside its own firing
 envelope and never engages, which reads as a broken weapon rather than as a
 content mistake.
 
-## Deploying it
-
-One container. The broker serves the built client as static files, so a
-deployment is not a web host plus a WebSocket service:
-
-```bash
-cd docker
-cp .env.example .env      # set DOMAIN and ACME_EMAIL
-docker compose --profile tls up -d
-```
-
-**HTTPS is not optional.** WebRTC refuses to run outside a secure context, so
-anything reachable by a hostname needs a real certificate before it works at
-all. `localhost` is exempt, which is why local testing works without one. Caddy
-is in the compose file for exactly this: it obtains and renews the certificate
-by itself.
-
-The image build runs `typecheck`, `lint` and the full test suite before it
-produces a runtime layer. An image that builds but fails its own determinism
-tests is worse than a failed build.
-
-### TURN, and why it is affordable here
-
-Public STUN gets the large majority of home-to-home connections through. It
-fails behind **symmetric NAT** — some corporate networks, most mobile carriers,
-CGNAT ISPs — where the only way through is a relay.
-
-```bash
-docker compose --profile tls --profile turn up -d
-```
-
-This is where the netcode choice pays off in operational cost. Lockstep sends
-only commands, so a relayed match is a few KB/s per player; a state-sync game
-relaying world snapshots would make running your own relay prohibitive.
-
-ICE configuration is served by the broker at `/ice` rather than baked into the
-client bundle, so rotating a TURN password does not mean rebuilding and
-redeploying the client. The client falls back to public STUN if that endpoint is
-missing, so an older broker still works.
-
 ## Reconnecting
 
-A data channel dies for reasons that have nothing to do with either player: a
-laptop sleeps, a phone changes cell, a router drops a NAT binding after a quiet
-minute. Without reconnect support any of those ends the match for that person
-and leaves their army standing on the field being shot.
+A connection dies for reasons that have nothing to do with either player: a
+laptop sleeps, a phone changes network, a router drops a NAT binding after a
+quiet minute. Without reconnect support any of those ends the match for that
+person and leaves their army standing on the field being shot.
 
 Two earlier decisions are what make it work:
 
 - The host keeps a disconnected player's slot, keyed by a **token the client
   generates** rather than by the peer id. A peer id is the identity of a
-  *socket*; reconnecting through the broker produces a new one, so keying on it
-  would hand a returning player a fresh empty slot.
+  *socket*; reconnecting produces a new one, so keying on it would hand a
+  returning player a fresh empty slot.
 - Match state is exchanged as a snapshot rather than replayed, so catching up
   after any length of absence costs one message.
+- The host's address does not change while it is hosting, so there is nothing to
+  rediscover: the retry is the original connection attempt, verbatim.
 
 The token has **no default**, deliberately. A shared default is worse than none:
 two guests carrying the same one are, to the host, the same player reconnecting,
@@ -740,6 +736,27 @@ Learned while building this, recorded so they are not re-learned:
 - **Reject an out-of-range player slot at the door.** Player ids index
   fixed-size per-player arrays in the simulation; a fifth player would read past
   the end of every one of them.
+- **A browser cannot accept an incoming connection.** That single fact is what
+  forced a broker into the earlier design, and removing it is what a desktop
+  build actually buys. Everything else about hosting was already possible.
+- **The `Transport` interface paid for itself here.** Swapping WebRTC and a
+  signalling broker for direct sockets changed the transport and the lobby and
+  touched no simulation, netcode, protocol or content code at all. Keeping four
+  packages free of both DOM and Node types from M0 is what made that true.
+- **A guest must learn the host exists at handshake, not from traffic.**
+  Inferring membership from the first message received leaves a connection
+  looking empty until the host says something -- and a guest that drops before
+  then never reports the loss. Membership now comes only from control frames.
+- **Never infer peer membership from a data frame.** Doing so papers over a
+  routing bug by inventing whatever peer the stray frame claimed to be from, and
+  routing bugs are exactly the ones worth failing loudly on.
+- **Buffered pipes make timestamps lie.** A renderer that appeared to crash the
+  instant it loaded had in fact run happily for seventeen seconds: `grep` was
+  buffering, so every line got stamped at flush. `--line-buffered` turned a
+  phantom crash into a non-event. Measure the thing, then check the measurement.
+- **`prefer-const` and mutually-referential closures.** Two ends of one pipe each
+  need the other; a holder object breaks the cycle without either being
+  reassigned, which is clearer than silencing the rule.
 
 ## Debug tooling
 
@@ -753,6 +770,12 @@ __rts.determinism()      // run the cross-runtime fixture, print its hash trace
 __rts.reveal(true)       // lift the fog, for watching what an opponent is doing
 __rts.verifyReplay()     // round-trip this match through the file format and re-simulate
 __rts.saveReplay()       // the match so far, as a Replay object (host only)
+```
+
+And from a terminal:
+
+```bash
+node scripts/check-port-forward.mjs   # can my friends actually reach me?
 __rts.scene              // the three.js scene: inspecting materials beats guessing
 __rts.session            // the HostSession: .log, .tick, .inputDelay, .desyncs
 ```
@@ -766,8 +789,9 @@ tooling captures nothing there, while a WebGL readback still works.
 - **M0** — Skeleton, fixed-point math, tick loop, isometric renderer ✅
 - **M1** — Simulation core: entity store, spatial hash, flow-field pathing, state hashing ✅
 - **M2** — Netcode: protocol, transport interface, host arbiter, desync detection, replays ✅
-- **M3** — WebRTC + lobby: signaling broker, join codes, connection diagnostics ✅
+- **M3** — Lobby and connection diagnostics ✅ *(originally WebRTC + a signaling broker; replaced in M8)*
 - **M4** — Gameplay: harvesting, construction, production, combat, victory ✅
 - **M5** — Content system: zod-validated race definitions, behaviour registry, race #2 ✅
 - **M6** — Presentation: fog of war, minimap, control groups, command UI, art pass ✅
-- **M7** — Ship: broker deployment, reconnect, replay playback ✅
+- **M7** — Ship: deployment, reconnect, replay playback ✅
+- **M8** — Desktop: direct connections, Electron shell, automatic port forwarding ✅

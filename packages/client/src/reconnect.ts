@@ -1,23 +1,26 @@
 import type { GuestSession } from "@rts/netcode";
 import type { World } from "@rts/sim";
-import { HOST_PEER, type PeerDiagnostic, type WebRtcTransport } from "@rts/transport";
+import { HOST_PEER, type SocketTransport } from "@rts/transport";
 import { joinMatch, type GuestConnection } from "./connect.js";
 
 /**
  * Getting a dropped guest back into the match.
  *
- * A WebRTC data channel dies for reasons that have nothing to do with either
- * player: a laptop sleeps, a phone changes cell, a router drops a NAT binding
- * after a quiet minute. Without this, any of those ends the match for that
- * person and leaves their army standing on the field being shot.
+ * A connection dies for reasons that have nothing to do with either player: a
+ * laptop sleeps, a phone changes network, a router drops a NAT binding after a
+ * quiet minute. Without this, any of those ends the match for that person and
+ * leaves their army standing on the field being shot.
  *
- * Reconnecting works because of two decisions made earlier:
+ * Reconnecting works because of three decisions made earlier:
  *
  *   - The host keeps a disconnected player's slot, keyed by a token that
  *     survives the drop, so the returning player gets their own units back
  *     rather than an empty slot.
  *   - Match state is exchanged as a snapshot rather than replayed, so catching
  *     up after any length of absence costs one message.
+ *   - The host's address does not change while it is hosting, so there is
+ *     nothing to rediscover -- the retry is the original connection attempt,
+ *     verbatim.
  *
  * The old session is replaced wholesale rather than re-pointed at a new
  * transport. A `GuestSession` registers its listeners at construction and holds
@@ -30,20 +33,19 @@ import { joinMatch, type GuestConnection } from "./connect.js";
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
 
 export interface ReconnectorOptions {
-  brokerUrl: string;
-  code: string;
+  /** The host's address, unchanged across attempts. */
+  address: string;
   world: World;
   token: string;
   name: string;
   /** Called with each new session, so the match loop can switch over to it. */
   onReconnected: (connection: GuestConnection) => void;
   onStatus?: (message: string, tone: "info" | "error") => void;
-  onDiagnostics?: (list: PeerDiagnostic[]) => void;
 }
 
 export class Reconnector {
   private readonly options: ReconnectorOptions;
-  private transport: WebRtcTransport;
+  private transport: SocketTransport;
   private attempt = 0;
   private retrying = false;
   private stopped = false;
@@ -105,17 +107,14 @@ export class Reconnector {
 
     try {
       const connection = await joinMatch({
-        brokerUrl: this.options.brokerUrl,
-        code: this.options.code,
+        address: this.options.address,
         world: this.options.world,
         token: this.options.token,
         name: this.options.name,
-        ...(this.options.onDiagnostics ? { onDiagnostics: this.options.onDiagnostics } : {}),
       });
       if (this.stopped) {
         connection.session.close();
         connection.transport.close();
-        connection.signaling.close();
         return;
       }
       this.retrying = false;
@@ -123,9 +122,10 @@ export class Reconnector {
       this.options.onStatus?.("reconnected", "info");
       this.options.onReconnected(connection);
     } catch {
-      // Deliberately swallowed. Every failure mode here -- host gone, broker
-      // down, still offline -- has the same remedy, and surfacing each one as
-      // its own message would just flicker text at a player who can only wait.
+      // Deliberately swallowed. Every failure mode here -- host gone, still
+      // offline, router dropped the mapping -- has the same remedy, and
+      // surfacing each as its own message would flicker text at a player who
+      // can only wait.
       this.schedule();
     }
   }

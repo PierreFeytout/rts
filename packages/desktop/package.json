@@ -1,0 +1,18 @@
+{
+  "name": "@rts/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "comment": "The Electron shell. Owns the window and, when hosting, the listening socket -- the two things a browser cannot do.",
+  "dependencies": {
+    "@rts/transport": "*",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@rts/content": "*",
+    "@rts/netcode": "*",
+    "@rts/sim": "*",
+    "@types/ws": "^8.18.1"
+  }
+}
