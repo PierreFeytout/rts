@@ -1,4 +1,4 @@
-import { defaultContent } from "@rts/content";
+import { defaultContent, type MapInfo } from "@rts/content";
 import {
   MAX_PLAYERS,
   NEUTRAL_PLAYER,
@@ -15,120 +15,143 @@ import {
  *
  * Only the host runs this. Guests receive the finished world as a snapshot in
  * their welcome message rather than generating it themselves -- two peers
- * independently building a world from the same seed is one more thing that can
- * silently disagree, and copying the bytes cannot.
+ * independently building a world from the same configuration is one more thing
+ * that can silently disagree, and copying the bytes cannot.
  *
- * Nothing here names a unit or a building. It asks the content set which
- * structure a race starts with and which worker it starts several of, so a new
- * race is playable the moment it is defined -- this file is one of the places
- * that would otherwise quietly need editing per race, and does not.
+ * Nothing here names a unit, a building or a piece of terrain. It asks the
+ * content set which structure a race starts with, which worker it starts
+ * several of, and what the chosen map contains. This file is one of the places
+ * that would otherwise quietly need editing per race and per map, and does not.
  */
-
-export const MAP_TILES = 128;
 
 export { MAX_PLAYERS };
 
-/** Race ids in a stable order, for the lobby's faction picker. */
+/** Race ids in a stable order, for the setup screen's pickers. */
 export const RACE_IDS = defaultContent.races.map((race) => race.id);
 
+/** Map ids in a stable order, for the setup screen's map list. */
+export const MAP_IDS = defaultContent.maps.map((map) => map.id);
+
 /**
- * How the four slots are populated.
+ * What occupies a player slot.
  *
- * "mixed" alternates through the available races, which means a guest joining
- * slot 1 is playing race #2 without anyone having to configure anything. That
- * is deliberate: an extensibility claim nobody ever sees exercised is a claim
- * worth doubting.
+ * `"empty"` is a real option rather than a shorter slot array, because a slot's
+ * index *is* its player id: the second slot is player 1 whether or not the
+ * first three are filled. Compacting the array would renumber everyone.
  */
-export type FactionMode = "mixed" | string;
+export type SlotKind = "human" | "computer" | "empty";
 
-const ALLOY_NODE = defaultContent.id("map.alloy-node");
-const VENT = defaultContent.id("map.vent");
+export interface Slot {
+  kind: SlotKind;
+  raceId: string;
+  name: string;
+}
+
+export interface MatchConfig {
+  mapId: string;
+  /**
+   * Seed for `world.rng`.
+   *
+   * No longer decides the layout -- the map file does. It still exists because
+   * the rng is live simulation state that later systems may draw from, and a
+   * world whose randomness started from the same number every match would be
+   * a surprise waiting to happen.
+   */
+  seed: number;
+  /** One entry per player id, `slots[2]` being player 2. */
+  slots: Slot[];
+}
 
 /**
- * Player slots are allocated up front rather than when someone joins.
+ * How many workers a player opens with.
  *
- * Every slot gets a base at tick zero, whether or not a human ever occupies it.
- * That is what lets someone join a match already in progress and immediately
- * have something to play -- spawning a base on join would be a simulation event
- * that has to be scheduled through the arbiter, and a guest arriving mid-battle
- * would be building from nothing.
- *
- * The cost is that an unoccupied slot leaves an idle base on the map. It counts
- * toward the victory condition, so a two-player game is technically a
- * four-player free-for-all where two of them never move.
+ * Content decides everything about *what* they are; this is a rule of the match
+ * rather than a property of a race, which is why it lives here.
  */
 const WORKERS_PER_PLAYER = 5;
 
-/** Distance from the map edge to each base's anchor tile. */
-const BASE_INSET = 14;
+/** Where the opening workers stand, as tile offsets from the start anchor. */
+const WORKER_OFFSET: [number, number] = [5, 4];
 
 /**
- * Base layout, as tile offsets from the player's anchor.
+ * A default match: you against one computer, on the first map.
  *
- * Identical for every player rather than mirrored per corner. A mirrored layout
- * looks nicer but makes the two diagonal players play a measurably different
- * opening, and asymmetry is not something to introduce by accident.
+ * Used to seed the setup screen so it opens on something playable rather than
+ * on a form to fill in.
  */
-const ORE_OFFSETS: Array<[number, number]> = [
-  [7, 0],
-  [0, 7],
-  [7, 7],
-];
-const VENT_OFFSET: [number, number] = [-4, 3];
-
-/** Which race each slot plays, given the host's choice. */
-export function raceLineup(mode: FactionMode): string[] {
-  const lineup: string[] = [];
-  for (let player = 0; player < MAX_PLAYERS; player++) {
-    lineup.push(mode === "mixed" ? RACE_IDS[player % RACE_IDS.length] : mode);
-  }
-  return lineup;
+export function defaultConfig(name: string): MatchConfig {
+  const map = defaultContent.maps[0];
+  return {
+    mapId: map.id,
+    seed: randomSeed(),
+    slots: emptySlots().map((slot, player) => {
+      if (player === 0) return { ...slot, kind: "human", name };
+      if (player === 1 && map.maxPlayers > 1) return { ...slot, kind: "computer" };
+      return slot;
+    }),
+  };
 }
 
-export function createMatchWorld(seed: number, mode: FactionMode = "mixed"): World {
-  const world = new World({ mapTiles: MAP_TILES, seed, types: defaultContent.types });
-  const lineup = raceLineup(mode);
-  const far = MAP_TILES - BASE_INSET - 8;
-
-  /** Anchor tile per player slot, one per corner. */
-  const origins: Array<[number, number]> = [
-    [BASE_INSET, BASE_INSET],
-    [far, far],
-    [far, BASE_INSET],
-    [BASE_INSET, far],
-  ];
-
-  // Obstacles come from the world's own seeded rng, so the layout is part of
-  // the simulation state that gets snapshotted rather than something a peer has
-  // to reproduce. Confined to the middle of the map: an obstacle rolled on top
-  // of a starting base would wall a player in before the match began.
-  const margin = BASE_INSET + 16;
-  for (let i = 0; i < 22; i++) {
-    const w = world.rng.nextRange(2, 7);
-    const h = world.rng.nextRange(2, 7);
-    const x = world.rng.nextRange(margin, MAP_TILES - margin - w);
-    const y = world.rng.nextRange(margin, MAP_TILES - margin - h);
-    world.grid.fillRect(x, y, w, h, TILE_BLOCKED);
-  }
-
-  // Contested expansions. Worth fighting over precisely because they are not
-  // inside anybody's base.
-  for (let i = 0; i < 8; i++) {
-    const x = world.rng.nextRange(margin, MAP_TILES - margin - 2);
-    const y = world.rng.nextRange(margin, MAP_TILES - margin - 2);
-    if (!areaFree(world, x, y, 2)) continue;
-    world.placeStructure(ALLOY_NODE, x, y, NEUTRAL_PLAYER);
-  }
-
+/** Every slot vacant, each pre-assigned a race so switching one on is one click. */
+export function emptySlots(): Slot[] {
+  const slots: Slot[] = [];
   for (let player = 0; player < MAX_PLAYERS; player++) {
-    const [originX, originY] = origins[player];
-    const race = defaultContent.race(lineup[player]);
+    slots.push({
+      kind: "empty",
+      // Alternating rather than all-the-same, so a default match is a match
+      // between two different races. An extensibility claim nobody ever sees
+      // exercised is a claim worth doubting.
+      raceId: RACE_IDS[player % RACE_IDS.length],
+      name: `Computer ${player + 1}`,
+    });
+  }
+  return slots;
+}
 
-    world.placeStructure(race.startBuilding, originX, originY, player);
-    for (const [dx, dy] of ORE_OFFSETS) {
-      world.placeStructure(ALLOY_NODE, originX + dx, originY + dy, NEUTRAL_PLAYER);
+export function randomSeed(): number {
+  return (Math.random() * 0x7fffffff) | 0;
+}
+
+/** Slots that will actually contest the match, in player-id order. */
+export function contenders(config: MatchConfig): number[] {
+  const out: number[] = [];
+  config.slots.forEach((slot, player) => {
+    if (slot.kind !== "empty") out.push(player);
+  });
+  return out;
+}
+
+/**
+ * Player slots are populated from the lobby's configuration.
+ *
+ * Historically every slot got a base whether or not anyone occupied it, so that
+ * someone joining a match already in progress had something to play. The lobby
+ * closes when the match starts, so there is no longer anyone to join mid-match
+ * except a player returning to a slot they already own -- and an unoccupied
+ * slot can now simply not exist.
+ *
+ * An `"empty"` slot leaves `inPlay` at 0. Without that it would count as
+ * instantly eliminated and a two-player game would declare a winner on the
+ * first tick; see the comment on `PlayerState.inPlay`.
+ */
+export function createMatchWorld(config: MatchConfig): World {
+  const map = defaultContent.map(config.mapId);
+  const world = new World({ mapTiles: map.size, seed: config.seed, types: defaultContent.types });
+
+  applyTerrain(world, map);
+
+  config.slots.forEach((slot, player) => {
+    if (slot.kind === "empty") return;
+    const start = map.starts[player];
+    // A map may seat fewer players than a match can hold. The setup screen
+    // bounds the choice, so reaching this is a bug rather than a user error --
+    // but silently spawning nothing would look like the slot never worked.
+    if (start === undefined) {
+      throw new Error(`match: ${config.mapId} has no start position for player ${player}`);
     }
-    world.placeStructure(VENT, originX + VENT_OFFSET[0], originY + VENT_OFFSET[1], NEUTRAL_PLAYER);
+
+    const race = defaultContent.race(slot.raceId);
+    world.placeStructure(race.startBuilding, start.x, start.y, player);
 
     // Workers start in the gap between the headquarters and the nearest ore, so
     // the opening move is obvious rather than a scavenger hunt.
@@ -137,14 +160,14 @@ export function createMatchWorld(seed: number, mode: FactionMode = "mixed"): Wor
         world.entities,
         world.types,
         race.startUnit,
-        tileCentre(originX + 5) + fxFromFloat((d % 3) * 0.7),
-        tileCentre(originY + 4) + fxFromFloat(Math.floor(d / 3) * 0.7),
+        tileCentre(start.x + WORKER_OFFSET[0]) + fxFromFloat((d % 3) * 0.7),
+        tileCentre(start.y + WORKER_OFFSET[1]) + fxFromFloat(Math.floor(d / 3) * 0.7),
         player,
       );
     }
 
     world.players.inPlay[player] = 1;
-  }
+  });
 
   // Supply is a derived total, normally refreshed at the end of each tick.
   // Priming it here means tick 0 is a playable tick: without it the first
@@ -154,17 +177,35 @@ export function createMatchWorld(seed: number, mode: FactionMode = "mixed"): Wor
   return world;
 }
 
-/** Every tile of a prospective footprint is in bounds and unoccupied. */
-function areaFree(world: World, tileX: number, tileY: number, span: number): boolean {
-  for (let y = tileY; y < tileY + span; y++) {
-    for (let x = tileX; x < tileX + span; x++) {
-      if (!world.grid.inBounds(x, y) || world.grid.isBlocked(x, y)) return false;
-    }
+/**
+ * Terrain and scenery, straight from the map file.
+ *
+ * Placed before any player, so a base can never land on top of an ore patch
+ * that had not been created yet. The map loader has already checked that they
+ * do not overlap; this ordering means a future map that slips through produces
+ * a visibly missing rock rather than a missing headquarters.
+ */
+function applyTerrain(world: World, map: MapInfo): void {
+  for (const [x, y, w, h] of map.blocks) {
+    world.grid.fillRect(x, y, w, h, TILE_BLOCKED);
   }
-  return true;
+  for (const resource of map.resources) {
+    world.placeStructure(resource.typeId, resource.x, resource.y, NEUTRAL_PLAYER);
+  }
 }
 
-/** An empty world of the right shape, for a guest to restore a snapshot into. */
-export function createEmptyWorld(): World {
-  return new World({ mapTiles: MAP_TILES, seed: 1, types: defaultContent.types });
+/**
+ * An empty world of the right shape, for a guest to restore a snapshot into.
+ *
+ * The size has to match the host's exactly -- `decodeSnapshot` refuses a
+ * mismatch rather than reading past the end of a grid. The guest learns it from
+ * the lobby's start message before this is called.
+ */
+export function createEmptyWorld(mapTiles: number): World {
+  return new World({ mapTiles, seed: 1, types: defaultContent.types });
+}
+
+/** Tiles on a named map, for sizing a world before its snapshot arrives. */
+export function mapSize(mapId: string): number {
+  return defaultContent.map(mapId).size;
 }

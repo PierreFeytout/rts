@@ -1,0 +1,118 @@
+import { MAX_NAME, playerName, setPlayerName } from "../identity.js";
+import { desktop } from "../desktop.js";
+import { escapeHtml, screen } from "../ui.js";
+
+/**
+ * The landing screen, and the multiplayer sub-menu behind it.
+ *
+ * Both are the same shape -- a title and a column of choices -- so they are one
+ * builder rather than two files that would drift apart.
+ *
+ * The player's name lives here rather than on the setup screens, because it is
+ * a property of the person and not of the match. Asking for it once, on the
+ * screen everything starts from, is what stops it being asked for again on the
+ * host screen and the join screen.
+ */
+
+export type MenuChoice = "skirmish" | "multiplayer" | "replay" | "quit";
+export type MultiplayerChoice = "host" | "join" | "back";
+
+interface Entry<T> {
+  value: T;
+  label: string;
+  /** One line under the button. Absent for entries that explain themselves. */
+  note?: string;
+  primary?: boolean;
+  disabled?: string;
+}
+
+export function showMenu(): Promise<MenuChoice> {
+  return choose<MenuChoice>({
+    title: "RTS",
+    sub: "peer-to-peer · deterministic lockstep",
+    name: true,
+    entries: [
+      {
+        value: "skirmish",
+        label: "Skirmish",
+        note: "One match against the computer.",
+        primary: true,
+      },
+      {
+        value: "multiplayer",
+        label: "Multiplayer",
+        note: "Host a game for friends, or join one.",
+      },
+      { value: "replay", label: "Watch a replay" },
+      ...(desktop ? [{ value: "quit" as const, label: "Quit" }] : []),
+    ],
+  });
+}
+
+export function showMultiplayerMenu(): Promise<MultiplayerChoice> {
+  return choose<MultiplayerChoice>({
+    title: "Multiplayer",
+    sub: "no server, no accounts — one of you runs the match",
+    entries: [
+      {
+        value: "host",
+        label: "Host a game",
+        note: desktop
+          ? "Your machine runs the match. It ends when you close the game."
+          : "Only the desktop app can accept connections.",
+        primary: true,
+        // A browser cannot open a listening socket. That is the entire reason
+        // this is a desktop application, and saying so is better than a button
+        // that fails in a way nobody can act on.
+        ...(desktop ? {} : { disabled: "hosting needs the desktop app" }),
+      },
+      { value: "join", label: "Join a game", note: "You will need your friend's address." },
+      { value: "back", label: "Back" },
+    ],
+  });
+}
+
+interface ChooseOptions<T> {
+  title: string;
+  sub: string;
+  entries: Array<Entry<T>>;
+  /** Show the name field. Only the landing screen does. */
+  name?: boolean;
+}
+
+function choose<T extends string>(options: ChooseOptions<T>): Promise<T> {
+  return new Promise((resolve) => {
+    const { root, panel } = screen();
+
+    panel.innerHTML =
+      `<h1>${escapeHtml(options.title)}</h1>` +
+      `<p class="sub">${escapeHtml(options.sub)}</p>` +
+      (options.name
+        ? `<label class="rts-field"><span>your name</span>` +
+          `<input id="menu-name" maxlength="${MAX_NAME}" autocomplete="off" spellcheck="false" ` +
+          `value="${escapeHtml(playerName())}" /></label><hr />`
+        : "") +
+      options.entries
+        .map(
+          (entry, i) =>
+            `<button class="block ${entry.primary ? "primary" : ""}" data-i="${i}"` +
+            `${entry.disabled ? ` disabled title="${escapeHtml(entry.disabled)}"` : ""}>` +
+            `${escapeHtml(entry.label)}</button>` +
+            (entry.note ? `<p class="rts-note" style="margin:-4px 0 12px">${escapeHtml(entry.note)}</p>` : ""),
+        )
+        .join("");
+
+    const nameInput = panel.querySelector<HTMLInputElement>("#menu-name");
+    // Saved on the way out rather than on every keystroke, and before the
+    // choice resolves, so the setup screen that follows already sees it.
+    const finish = (value: T): void => {
+      if (nameInput) setPlayerName(nameInput.value);
+      root.remove();
+      resolve(value);
+    };
+
+    for (const button of panel.querySelectorAll<HTMLButtonElement>("button[data-i]")) {
+      button.onclick = () => finish(options.entries[Number(button.dataset.i)].value);
+    }
+  });
+}

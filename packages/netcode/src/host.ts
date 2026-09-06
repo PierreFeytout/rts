@@ -6,7 +6,6 @@ import {
   MSG_SNAPSHOT,
   MSG_WELCOME,
   MSG_REJECT,
-  MSG_PEER_STATE,
   PROTOCOL_VERSION,
   encodeMessage,
   tryDecodeMessage,
@@ -77,6 +76,21 @@ export interface HostOptions {
    * fixture tables and have no content set. Real matches always pass one.
    */
   contentHash?: number;
+  /**
+   * The players this match was started for, from the lobby.
+   *
+   * When present, it is the guest list: a hello whose token is not on it is
+   * refused, and one that is on it gets the player id the lobby assigned rather
+   * than the next free number. Both matter. A match that kept accepting
+   * newcomers would hand someone a slot whose base was never placed, and
+   * first-come numbering would renumber a player who reconnected after somebody
+   * else had already returned.
+   *
+   * Omitted, the host accepts anyone and numbers them in arrival order, which
+   * is what the engine tests rely on and what the old join-in-progress lobby
+   * did.
+   */
+  roster?: readonly RosterEntry[];
   onBeforeTick?: (world: World) => void;
   /**
    * Called immediately after each `world.step`, while `world.events` still
@@ -87,6 +101,14 @@ export interface HostOptions {
    * polled after `update()` would see only the last tick of a catch-up burst.
    */
   onAfterTick?: (world: World) => void;
+}
+
+/** One player the lobby agreed on, before the match existed. */
+export interface RosterEntry {
+  /** Stable identity; see `HelloMessage.token`. The host's own is "host". */
+  token: string;
+  playerId: number;
+  name: string;
 }
 
 interface PlayerSlot {
@@ -112,6 +134,8 @@ export class HostSession {
   private readonly hashInterval: number;
   private readonly hashHistory: number;
   private readonly contentHash: number;
+  /** Lobby guest list, by token, or null when anyone may join. */
+  private readonly roster: Map<string, RosterEntry> | null;
   private readonly onDesync: HostOptions["onDesync"];
   /**
    * Renderer hooks. Public and mutable because the renderer is built *after*
@@ -148,16 +172,22 @@ export class HostSession {
     this.hashInterval = options.hashInterval ?? 30;
     this.hashHistory = options.hashHistory ?? 300;
     this.contentHash = options.contentHash ?? 0;
+    this.roster = options.roster
+      ? new Map(options.roster.map((entry) => [entry.token, entry]))
+      : null;
     this.onDesync = options.onDesync;
     this.onBeforeTick = options.onBeforeTick;
     this.onAfterTick = options.onAfterTick;
 
-    // The host always occupies player slot 0.
+    // The host always occupies player slot 0, and takes its name from the
+    // roster when there is one -- a scoreboard reading "host" next to three
+    // real names is the kind of detail that makes a lobby feel unfinished.
+    const self = options.roster?.find((entry) => entry.playerId === 0);
     const hostSlot: PlayerSlot = {
       peer: this.transport.localPeer,
-      token: "host",
+      token: self?.token ?? "host",
       playerId: 0,
-      name: "host",
+      name: self?.name ?? "host",
       connected: true,
       lastVerifiedTick: 0,
       lateCommands: 0,
@@ -328,6 +358,19 @@ export class HostSession {
       return;
     }
 
+    // The lobby closed when the match began. Somebody arriving now is either a
+    // player coming back from a dropped connection -- who is on the roster and
+    // gets their own slot -- or a stranger, who has no base on the field and
+    // nothing to play.
+    const expected = this.roster?.get(token);
+    if (this.roster !== null && expected === undefined) {
+      this.transport.send(
+        from,
+        encodeMessage({ t: MSG_REJECT, reason: "that match has already begun" }),
+      );
+      return;
+    }
+
     // Returning player, new socket. Matching on the token rather than the peer
     // is the whole of reconnect support: the slot, the player id and therefore
     // every unit on the field come back with them.
@@ -341,10 +384,13 @@ export class HostSession {
       slot.connected = true;
       slot.name = name;
     } else {
-      // Lowest unused player id, so ids stay dense and reproducible.
-      const taken = new Set([...this.slots.values()].map((s) => s.playerId));
-      let playerId = 0;
-      while (taken.has(playerId)) playerId++;
+      // The lobby already decided who is which player. Failing that, the lowest
+      // unused id, so ids stay dense and reproducible.
+      let playerId = expected?.playerId ?? 0;
+      if (expected === undefined) {
+        const taken = new Set([...this.slots.values()].map((s) => s.playerId));
+        while (taken.has(playerId)) playerId++;
+      }
       if (playerId >= MAX_PLAYERS) {
         this.transport.send(
           from,
@@ -381,8 +427,6 @@ export class HostSession {
         snapshot: encodeSnapshot(this.world),
       }),
     );
-
-    this.transport.broadcast(encodeMessage({ t: MSG_PEER_STATE, players: this.players }));
   }
 
   private handleHash(from: PeerId, tick: number, hash: number): void {
@@ -421,7 +465,6 @@ export class HostSession {
     // The slot is kept, marked disconnected, so the player's units remain on
     // the field and the same player id is restored if they reconnect.
     slot.connected = false;
-    this.transport.broadcast(encodeMessage({ t: MSG_PEER_STATE, players: this.players }));
   };
 
   /** Diagnostics: commands that arrived too late for their requested tick. */

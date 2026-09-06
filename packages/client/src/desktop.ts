@@ -29,7 +29,9 @@ export interface HostInfo {
 export interface DesktopBridge {
   host(): Promise<HostInfo>;
   stopHosting(): Promise<void>;
-  onRoster(handler: (players: number) => void): () => void;
+  /** Close the application from its own menu. Absent in a browser, where the
+   * page cannot close itself and the menu therefore offers no Quit. */
+  quit(): Promise<void>;
 }
 
 /** The bridge, or null in a browser. */

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RTS — M4</title>
+    <title>RTS</title>
     <style>
       :root {
         color-scheme: dark;
@@ -45,7 +45,10 @@
       #help {
         position: fixed;
         bottom: 12px;
-        left: 12px;
+        /* Clear of the minimap, which is 190px wide in the same corner and has
+           a z-index. This strip was drawn underneath it and invisible. */
+        left: 214px;
+        right: 12px;
         color: #5f7896;
         font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         pointer-events: none;

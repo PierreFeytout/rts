@@ -32,3 +32,46 @@ function mint(): string {
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+// ---------------------------------------------------------------------------
+// Display name
+// ---------------------------------------------------------------------------
+
+const NAME_KEY = "rts.playerName";
+
+/**
+ * What other players see in the lobby and on the scoreboard.
+ *
+ * `localStorage`, unlike the token: a name is meant to be the same every time
+ * this person plays, and two tabs of the same browser sharing one is correct
+ * -- they are the same person testing. The token is what must differ, and does.
+ */
+export function playerName(): string {
+  try {
+    const stored = localStorage.getItem(NAME_KEY);
+    if (stored && stored.trim().length > 0) return stored;
+  } catch {
+    // Blocked site data. A default name is better than refusing to play.
+  }
+  return `Player ${playerToken().slice(0, 4)}`;
+}
+
+export function setPlayerName(name: string): void {
+  const trimmed = name.trim().slice(0, MAX_NAME);
+  if (trimmed.length === 0) return;
+  try {
+    localStorage.setItem(NAME_KEY, trimmed);
+  } catch {
+    // See above. The name still applies to this session; it just will not
+    // be remembered next time.
+  }
+}
+
+/**
+ * Longest name accepted.
+ *
+ * Names are rendered into fixed-width lobby rows and a scoreboard, and are
+ * chosen by other people. Truncating at the door is simpler than every place
+ * that displays one having to cope.
+ */
+export const MAX_NAME = 20;

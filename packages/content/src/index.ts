@@ -1,9 +1,14 @@
 import { buildContent, type ContentSet } from "./intern.js";
+import riftBasin from "./maps/rift-basin.json" with { type: "json" };
+import sprawl from "./maps/sprawl.json" with { type: "json" };
 import { concord } from "./races/concord.js";
 import { mapResources } from "./races/map-resources.js";
 import { vanguard } from "./races/vanguard.js";
 
+export * from "./fixture-map.js";
 export * from "./intern.js";
+export * from "./map.js";
+export * from "./map-schema.js";
 export * from "./schema.js";
 export { concord, mapResources, vanguard };
 
@@ -17,9 +22,14 @@ export { concord, mapResources, vanguard };
  *
  * Adding a race means adding one file and one entry in this array. Nothing else
  * in the codebase changes; that is the claim `concord.test.ts` verifies rather
- * than asserts.
+ * than asserts. Adding a map is the same shape of change -- one file written by
+ * scripts/generate-map.mjs, and one entry here.
  */
-export const defaultContent: ContentSet = buildContent([vanguard, concord], mapResources);
+export const defaultContent: ContentSet = buildContent(
+  [vanguard, concord],
+  mapResources,
+  [riftBasin, sprawl],
+);
 
 /**
  * Convenience: the shipped type table, which is what `World` wants.

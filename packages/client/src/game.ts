@@ -2,6 +2,7 @@ import { ReplayRecorder, type Replay } from "@rts/netcode";
 import type { GuestSession, HostSession } from "@rts/netcode";
 import { TICK_HZ, TICK_MS, hashToString, type Command, type World } from "@rts/sim";
 import * as THREE from "three";
+import type { AiDriver } from "./ai/driver.js";
 import { CameraControls } from "./camera-controls.js";
 import { ControlGroups } from "./control-groups.js";
 import { Effects } from "./effects.js";
@@ -44,6 +45,15 @@ export interface GameOptions {
   localPlayer: number;
   isHost: boolean;
   mapTiles: number;
+  /**
+   * Computer players, by slot. Host only.
+   *
+   * They live here rather than beside the session because their output is
+   * commands and this is where commands are submitted. A guest is given none:
+   * the host runs every computer player and broadcasts what they decided, so
+   * all peers execute identical orders. See ai/driver.ts.
+   */
+  ai?: Map<number, AiDriver>;
   /** Rendered in the HUD so a player can read their code back out mid-game. */
   joinCode?: string;
   onStatus?: (status: GameStatus) => void;
@@ -152,8 +162,17 @@ export function startGame(options: GameOptions): RunningGame {
   // that a step produced -- both per tick, not per frame. A renderer that
   // sampled after `update()` would miss every tick but the last of a catch-up
   // burst, which is exactly when the most is happening.
+  const ai = options.ai ?? new Map<number, AiDriver>();
+
   function wireTickHooks(target: MatchSession): void {
-    target.onBeforeTick = (w) => units.capturePrevious(w);
+    target.onBeforeTick = (w) => {
+      // Through `submitLocal`, so a computer player's orders are scheduled at
+      // T+delay exactly like a human's and every peer runs the same ones.
+      for (const [player, driver] of ai) {
+        driver.onTick(w, player, (command) => session.submitLocal(command));
+      }
+      units.capturePrevious(w);
+    };
     target.onAfterTick = (w) => {
       effects.ingest(w);
       hud.ingest(w);
@@ -371,7 +390,25 @@ export function startGame(options: GameOptions): RunningGame {
       groups.dispose();
       minimap.dispose();
       fog.dispose();
+      terrain.dispose();
       window.removeEventListener("resize", resize);
+
+      // The scene's own resources. Nothing used to call `stop` at all, so this
+      // never mattered; now that a match can end and another begin, skipping it
+      // leaks every geometry, material and texture of the previous match into
+      // the next one -- and on the third or fourth match that is visible as a
+      // browser tab using a gigabyte.
+      scene.traverse((object) => {
+        const mesh = object as Partial<THREE.Mesh>;
+        mesh.geometry?.dispose();
+        const material = mesh.material;
+        if (Array.isArray(material)) for (const m of material) m.dispose();
+        else material?.dispose();
+      });
+      scene.clear();
+      renderer.dispose();
+      // Leaves the canvas holding the last frame, which is what the menu
+      // fading in over it should cover rather than a flash of white.
     },
   };
 }

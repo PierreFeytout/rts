@@ -25,6 +25,15 @@
  * `mul` computes `(a * b) / 65536` in float64. That product is exact only while
  * |a * b| < 2^53, so every operand must satisfy |x| < 2^26, i.e. 1024.0 in world
  * units. A 256-tile map at 1 tile = 1.0 sits at 2^24, leaving 64x headroom.
+ *
+ * This is what caps map size at 1024 tiles (MAX_MAP_TILES in
+ * packages/content/src/map-schema.ts). A map that size has *no* headroom: a
+ * coordinate at the far edge is 2^26 exactly. `fxMul` of two such coordinates is
+ * still exact, which is why it is allowed -- but anything that squares two
+ * absolute coordinates and adds the results lands on 2^53, one past the last
+ * integer float64 can represent. Distance math takes deltas rather than
+ * absolute positions and so stays well clear; new math that does not must not
+ * assume the same.
  * `enableDevChecks()` turns this into a hard runtime assertion; the client and
  * the test suite switch it on, so violations surface immediately in development
  * rather than as a mid-match desync.

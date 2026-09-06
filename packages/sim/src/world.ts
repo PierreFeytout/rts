@@ -626,7 +626,9 @@ export class World {
           const ty = worldToTile(posY[i]);
           const field = goal >= 0 ? this.flowFields.get(this.grid, goal) : null;
           const cell = this.grid.inBounds(tx, ty) ? this.grid.index(tx, ty) : -1;
-          const dir = field && cell >= 0 ? field.dir[cell] : -1;
+          // `dirAt`, not `dir[cell]`: a field covers a window around its goal,
+          // and on a large map the window index and the map index differ.
+          const dir = field && cell >= 0 ? field.dirAt(cell) : -1;
 
           if (dir >= 0) {
             // Follow the field toward the goal tile.

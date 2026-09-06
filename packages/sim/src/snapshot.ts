@@ -126,6 +126,22 @@ export function encodeSnapshot(world: World): Uint8Array {
 }
 
 /**
+ * How big a map this snapshot came from.
+ *
+ * Reads only the header, so it is cheap and works on a snapshot that could not
+ * be decoded into any world we currently have -- which is exactly the case it
+ * exists for. A replay file carries a snapshot and nothing else that knows the
+ * map size, and a world of the wrong size is refused by `decodeSnapshot` rather
+ * than resized.
+ */
+export function snapshotMapTiles(data: Uint8Array): number {
+  const aligned = data.byteOffset % 4 === 0 ? data : new Uint8Array(data.slice().buffer);
+  const header = new Int32Array(aligned.buffer, aligned.byteOffset, HEADER_INTS);
+  if (header[0] !== MAGIC) throw new Error("snapshot: bad magic");
+  return header[7];
+}
+
+/**
  * Restore a world in place from a snapshot.
  *
  * Mutates rather than returning a fresh world, so existing references held by

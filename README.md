@@ -4,13 +4,15 @@ A futuristic real-time strategy game. 2.5D isometric, peer-hosted multiplayer �
 everyone runs the same executable, and the player who creates the game hosts it.
 There is no server to deploy and no third party involved.
 
-**Status: M8 complete — it is a desktop game.** Click **Host a game**, send a
-friend your address, and play. Your machine opens the port and runs the match;
-closing the window ends it.
+**Status: M9 complete — it has a front end.** A menu, a skirmish against the
+computer, and a real multiplayer lobby: friends join, everyone picks a race, and
+the host starts when the room is ready. Your machine opens the port and runs the
+match; closing the window ends it.
 
 Gather alloy, tap geothermal vents for plasma, build a base, train an army, and
-destroy your opponent. Two playable races, fog of war, a minimap, control
-groups, reconnect after a dropped connection, and a replay of every match.
+destroy your opponent. Two playable races, two maps, fog of war, a minimap,
+control groups, reconnect after a dropped connection, and a replay of every
+match.
 
 **The simulation has been verified bit-identical between Node v22.15 and
 Chrome 148** across 600 ticks — see "Cross-runtime determinism check" below.
@@ -24,12 +26,10 @@ npm install
 npm run desktop    # build everything, then launch the game
 ```
 
-Click **Host a game**. The app opens a port, asks your router to forward it, and
-shows you two addresses: one for friends on your network and one for friends
-anywhere else. They paste it into **Join** and they are in.
-
-There is no waiting room — guests join a match already in progress, because the
-welcome snapshot makes late joining the natural case rather than a special one.
+**Skirmish** starts a game against the computer immediately. **Multiplayer →
+Host** opens a port, asks your router to forward it, and shows two addresses:
+one for friends on your network and one for friends anywhere else. They paste it
+into **Join**, appear in your lobby, pick their race, and you press Start.
 
 To build installers:
 
@@ -80,7 +80,7 @@ RTS_DEV_SERVER=http://localhost:5173 npx electron packages/desktop/dist/main.js
 ```
 
 ```bash
-npm test           # 273 tests
+npm test           # 338 tests
 npm run typecheck
 npm run lint       # includes the determinism rules
 ```
@@ -95,13 +95,13 @@ npm run lint       # includes the determinism rules
 | `Ctrl+1`..`9` | assign a control group |
 | `1`..`9` | recall a group; press twice to centre the camera on it |
 | click/drag minimap | jump the camera |
-
-The host gets a **save replay** button; anyone can load one from the lobby with
-**Watch a replay**.
 | `S` / `H` | stop / hold position |
 | `Esc` | cancel a pending build placement |
 | `WASD`, arrows, middle-drag | pan |
 | wheel | zoom |
+
+The host gets a **save replay** button in the corner; anyone can load one from
+the main menu with **Watch a replay**. **Leave match** returns to the menu.
 
 Right-click is deliberately contextual — the same button means move, attack,
 gather or rally depending on what is under the cursor. That is the genre
@@ -113,12 +113,12 @@ mandatory.
 | Package | Role |
 |---|---|
 | `packages/sim` | Deterministic simulation. **Zero dependencies, no DOM, no Node APIs.** |
-| `packages/content` | Race definitions, zod schemas, id interning, content hashing |
+| `packages/content` | Race and map definitions, zod schemas, id interning, content hashing |
 | `packages/transport` | `Transport` interface + in-memory virtual network. No DOM, no Node. |
 | `packages/protocol` | Wire messages and MessagePack codec |
 | `packages/netcode` | Host arbiter, guest session, replay. No DOM, no Node. |
 | `packages/desktop` | The Electron shell: the window, and the listening socket |
-| `packages/client` | Vite + Three.js renderer, lobby, input |
+| `packages/client` | Vite + Three.js renderer, menus, lobby, input |
 
 Inside `packages/sim`: `fixed` (Q16.16 math), `rng`, `clock` (tick pacing),
 `hash` (state hashing), `entities` (SoA store), `grid` (passability),
@@ -128,6 +128,12 @@ war), `commands`, `types` (the *shape* of content, and the damage matrix),
 `events` (derived output for the renderer), `snapshot` (serialisation),
 `fixture-types` and `scenario` (the determinism fixture), and `world` (`step()`
 is the only mutator).
+
+Inside `packages/client`: `screens/` (menu, match setup, join, and the router
+that loops between them), `lobby-host` and `lobby-guest` (the pre-match
+protocol), `match` (building a world from a lobby configuration), `game` (the
+match screen), `ui` (the design tokens, in one place at last), and the
+renderers.
 
 Four packages — `sim`, `content`, `protocol`, `netcode` — and `transport` too
 deliberately avoid both DOM and Node types. That constraint is what made this
@@ -263,6 +269,33 @@ also refuses control frames from clients — only it may say who joined — and
 caps the player count, because player ids index fixed-size arrays in the
 simulation and a fifth would read past the end of every one of them.
 
+### The lobby
+
+Before a match exists there is a conversation over the same socket the match
+will use. Five messages (`MSG_LOBBY_*` in `packages/protocol/src/messages.ts`),
+and one rule running through all of them: **the host owns the configuration and
+guests send requests.** A guest asks to play the Concord and waits to be told
+what the lobby now looks like; it never updates its own copy optimistically.
+
+That is the same rule the arbiter follows for commands, for the same reason. A
+lobby where two people can both change the map is a lobby where they disagree
+about which map they are on, and find out at the loading screen.
+
+The connection is handed from `LobbyGuest` to `GuestSession` at Start, on the
+same socket — no second handshake, and no window in which the host has begun and
+the guest is still dialling. `LobbyGuest` detaches its listener *before* telling
+the caller the match started, because the host's first match message can arrive
+in the very next frame and would otherwise be eaten.
+
+**The lobby closes at Start.** From then on `HostSession` accepts only the
+tokens the lobby agreed on (`HostOptions.roster`), and gives each one the player
+id the lobby assigned rather than the next free number. Both halves matter: a
+match that kept accepting newcomers would hand somebody a slot whose base was
+never placed, and first-come numbering would renumber a player who reconnected
+after someone else had already returned. Reconnect and initial join are the same
+code path, so this is the one change most able to break reconnect — which is why
+`roster.test.ts` asserts a dropped player still lands on their own army.
+
 ### Being reachable
 
 This is the cost of having no server. Nothing is deployed anywhere, but the
@@ -310,6 +343,34 @@ Everything about both of them lives in `packages/content` as *data*, reached
 through `World.types` rather than imported by the systems that use it. No system
 hardcodes a number, and the simulation cannot import a race even by accident —
 see "Adding a race" below.
+
+### Maps
+
+Two ship: **Rift Basin** (256×256, four corners) and **Sprawl** (1024×1024, a
+very long walk). They are content, exactly like a race — validated data files
+under `packages/content/src/maps/`, folded into the content hash, so a peer with
+a different idea of "Rift Basin" is refused at the door instead of desyncing on
+the first order.
+
+Terrain is a list of **blocked rectangles** rather than one entry per tile. A
+1024-tile map is a million tiles; as JSON that is tens of megabytes of mostly
+zeroes and an unreadable diff. Rectangles are compact, editable by hand, and map
+one-to-one onto the `fillRect` the loader already calls. The files are produced
+by `scripts/generate-map.mjs`, which is committed alongside them — hand-typing
+three hundred rectangles is data entry, not authoring — and re-running it
+reproduces them byte for byte.
+
+zod proves each field is well-formed. It cannot prove a map is *playable*, so
+`packages/content/src/map.ts` checks the rest: every start has room for a
+headquarters, nothing walls a player in before the match begins, ore is not
+buried under a cliff, two patches do not overlap (the second `placeStructure`
+would silently fail and the map would be one rock short of what its author
+drew), and every start can reach both an ore patch and a vent. Each of those is
+a map that loads cleanly and is unplayable.
+
+**1024 is the ceiling, and it is not a round number.** Q16.16 world coordinates
+must stay under `FX_MAX_OPERAND` (2^26), which is 1024.0 world units, and one
+tile is one world unit. See "The magnitude bound".
 
 **Two resources, with deliberately different acquisition loops.** *Alloy* is a
 round trip — a worker walks to an ore patch, mines for a second, and walks the
@@ -389,7 +450,8 @@ Two grids per player, and the distinction between them is the interesting part:
   reads. Wholesale rather than incrementally — an incremental scheme has to
   subtract a unit's old circle before adding its new one, and getting that wrong
   leaves permanent phantom vision that nothing ever clears. A memset plus a few
-  hundred stamped circles costs **0.21 ms per tick at 400 units**.
+  hundred stamped circles costs **0.21 ms per tick at 400 units**, and it stays
+  that cheap on a 1024-tile map — the stamping is per unit, not per tile.
 - **`explored`** only ever gains bits, and *nothing in the simulation reads it*.
   It exists so the renderer can draw terrain you have seen before. That makes it
   presentation state: not hashed, not snapshotted, and peers are **expected** to
@@ -427,6 +489,49 @@ unit that can shoot further than it can see is blind inside its own firing
 envelope and never engages, which reads as a broken weapon rather than as a
 content mistake.
 
+## What a big map costs
+
+Three things in the engine scale with map *area*, and a 1024-tile map is 64x the
+area of the 128-tile map everything was tuned on. Two of them needed fixing, and
+the numbers below are measured on Sprawl in Chrome 148.
+
+**Flow fields are windowed.** A field is a Dijkstra pass from the destination,
+and unwindowed on a 1024 map that is a million cells and five megabytes *per
+cached destination* — tens of milliseconds against a 50 ms tick budget, for one
+order. `FLOW_WINDOW` caps a field at 256 tiles square, centred on the goal and
+clamped to the map, so the cost of a field is now the same on every map size:
+**15.7 ms** for a fresh destination, against a **2.0 ms** steady-state tick.
+
+A unit outside the window reads no direction and steers straight at its
+destination until it enters — the same fallback already used by a unit standing
+in the goal tile, so this narrows the field rather than adding a code path.
+Crossing half a continent is navigated crudely and the last few hundred tiles
+precisely, which is the right way round.
+
+The window is derived from the **goal alone**. That is what keeps a field a pure
+function of (grid, goal): the cache key is unchanged, and two peers cannot
+window differently. 256 is also the size of the largest map that predates
+windowing, so every map at or below it is covered whole and behaves exactly as
+before — the determinism fixture's hash did not move.
+
+**The fog texture is capped.** It is rebuilt and re-uploaded every simulation
+tick; at one texel per tile a 1024 map is four megabytes twenty times a second,
+more bandwidth than everything else the renderer does put together. Capped at
+256 texels it is **256 kB**, the same on every map. Sampling at a stride is safe
+because the smallest sight radius in the content is 6 tiles, so a visible patch
+of ground is at least a dozen tiles across and cannot slip between samples.
+
+**What did not need fixing:** vision (0.23 ms/tick — stamping is per unit),
+terrain rendering (already one `InstancedMesh`; 20,315 instances draw in 0.53 ms
+per frame), and the minimap, which only needed its fog sampled at a stride
+because the canvas is 190 px across and was sampling five tiles per pixel.
+
+**What was accepted rather than fixed:** the snapshot carries the raw cost grid,
+so on Sprawl it is **1 MB**. That is a one-off on join and on reconnect, and a
+Sprawl replay file is 1 MB before it contains a single command. Compressing it
+is future work; the grid is mostly zeroes and would run-length encode to almost
+nothing.
+
 ## Reconnecting
 
 A connection dies for reasons that have nothing to do with either player: a
@@ -434,7 +539,7 @@ laptop sleeps, a phone changes network, a router drops a NAT binding after a
 quiet minute. Without reconnect support any of those ends the match for that
 person and leaves their army standing on the field being shot.
 
-Two earlier decisions are what make it work:
+Three earlier decisions are what make it work:
 
 - The host keeps a disconnected player's slot, keyed by a **token the client
   generates** rather than by the peer id. A peer id is the identity of a
@@ -580,6 +685,24 @@ for anything gameplay-visible, which is why nothing gameplay-visible lives here.
 
 Learned while building this, recorded so they are not re-learned:
 
+- **A window index is not a map index.** A flow field covers a 256-tile window
+  around its goal, so on a larger map the two index spaces differ by an offset.
+  Reading one with the other does not go out of bounds — it returns a perfectly
+  plausible direction for entirely the wrong tile. `dirAt`/`distAt` take map
+  indices and are the only supported way in.
+- **A slot vacated in the lobby is not a slot vacated mid-match.** Before the
+  match there is nothing built, so the seat is freed for whoever is next. After
+  it, the slot is held by token, because there is an army standing on the field
+  that belongs to somebody. Treating the two the same either strands a returning
+  player or blocks a seat forever.
+- **`inPlay` is what stops a two-player match ending on tick one.** An
+  unoccupied slot owns nothing, and owning nothing is exactly how the defeat
+  check recognises a beaten player. Slots used to be filled unconditionally,
+  which hid this; now that empty slots are real, the flag is load-bearing.
+- **`startGame` returns a `stop()`, and it must actually be called.** Nothing
+  called it while the match screen was the last thing that ever happened. Once
+  you can return to a menu and start another match, skipping it leaks every
+  geometry, material and texture of the previous match into the next.
 - **The simulation is not driven by `requestAnimationFrame`.** Browsers stop
   firing rAF for hidden tabs. Since the host client is also the lockstep
   arbiter, an rAF-driven sim would stall the match for everyone the moment the
@@ -826,3 +949,8 @@ tooling captures nothing there, while a WebGL readback still works.
 - **M6** — Presentation: fog of war, minimap, control groups, command UI, art pass ✅
 - **M7** — Ship: deployment, reconnect, replay playback ✅
 - **M8** — Desktop: direct connections, Electron shell, automatic port forwarding ✅
+- **M9** — Front end: menu, skirmish, multiplayer lobby, authored maps ✅
+
+Next, in no committed order: a computer player that actually plays (the seam is
+`packages/client/src/ai/driver.ts`), a map editor, host migration, and authored
+`.glb` models in place of the procedural silhouettes.

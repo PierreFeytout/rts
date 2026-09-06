@@ -3,9 +3,12 @@ import {
   DIR_X,
   DIR_Y,
   FLOW_UNREACHABLE,
+  FLOW_WINDOW,
   FlowFieldCache,
   buildFlowField,
+  flowWindow,
   nearestWalkable,
+  type FlowField,
 } from "./flowfield.js";
 import { CostGrid, TILE_BLOCKED } from "./grid.js";
 
@@ -16,7 +19,7 @@ function openGrid(size = 16): CostGrid {
 /** Walk the field from a start tile to the goal, or fail after `maxSteps`. */
 function walk(
   grid: CostGrid,
-  field: { dir: Int8Array },
+  field: FlowField,
   startX: number,
   startY: number,
   maxSteps = 4096,
@@ -27,7 +30,7 @@ function walk(
   for (let s = 0; s < maxSteps; s++) {
     const cell = grid.index(x, y);
     path.push(cell);
-    const d = field.dir[cell];
+    const d = field.dirAt(cell);
     if (d < 0) return { reached: true, steps: s, path };
     x += DIR_X[d];
     y += DIR_Y[d];
@@ -41,20 +44,20 @@ describe("buildFlowField", () => {
     const grid = openGrid();
     const goal = grid.index(8, 8);
     const f = buildFlowField(grid, goal);
-    expect(f.dist[goal]).toBe(0);
-    expect(f.dir[goal]).toBe(-1);
+    expect(f.distAt(goal)).toBe(0);
+    expect(f.dirAt(goal)).toBe(-1);
   });
 
   it("uses 10 for orthogonal and 14 for diagonal steps", () => {
     const grid = openGrid();
     const goal = grid.index(8, 8);
     const f = buildFlowField(grid, goal);
-    expect(f.dist[grid.index(9, 8)]).toBe(10);
-    expect(f.dist[grid.index(8, 9)]).toBe(10);
-    expect(f.dist[grid.index(9, 9)]).toBe(14);
+    expect(f.distAt(grid.index(9, 8))).toBe(10);
+    expect(f.distAt(grid.index(8, 9))).toBe(10);
+    expect(f.distAt(grid.index(9, 9))).toBe(14);
     // Two diagonals must beat two orthogonals, or units zigzag instead of
     // taking the hypotenuse.
-    expect(f.dist[grid.index(10, 10)]).toBe(28);
+    expect(f.distAt(grid.index(10, 10))).toBe(28);
   });
 
   it("leads every open tile to the goal", () => {
@@ -98,8 +101,8 @@ describe("buildFlowField", () => {
     }
 
     const f = buildFlowField(grid, grid.index(10, 10));
-    expect(f.dist[grid.index(2, 2)]).toBe(FLOW_UNREACHABLE);
-    expect(f.dir[grid.index(2, 2)]).toBe(-1);
+    expect(f.distAt(grid.index(2, 2))).toBe(FLOW_UNREACHABLE);
+    expect(f.dirAt(grid.index(2, 2))).toBe(-1);
   });
 
   it("refuses to cut diagonally between two blocked tiles", () => {
@@ -112,7 +115,7 @@ describe("buildFlowField", () => {
 
     const f = buildFlowField(grid, grid.index(1, 1));
     // (0,0) is sealed off, so it must be unreachable rather than one diagonal step.
-    expect(f.dist[grid.index(0, 0)]).toBe(FLOW_UNREACHABLE);
+    expect(f.distAt(grid.index(0, 0))).toBe(FLOW_UNREACHABLE);
   });
 
   it("refuses a diagonal past a single blocked corner", () => {
@@ -126,20 +129,20 @@ describe("buildFlowField", () => {
     const grid = openGrid(8);
     grid.set(1, 0, TILE_BLOCKED);
     const f = buildFlowField(grid, grid.index(1, 1));
-    expect(f.dist[grid.index(0, 0)]).toBe(20);
+    expect(f.distAt(grid.index(0, 0))).toBe(20);
   });
 
   it("allows a diagonal through fully open space", () => {
     const grid = openGrid(8);
     const f = buildFlowField(grid, grid.index(1, 1));
-    expect(f.dist[grid.index(0, 0)]).toBe(14);
+    expect(f.distAt(grid.index(0, 0))).toBe(14);
   });
 
   it("returns an empty field when the goal itself is blocked", () => {
     const grid = openGrid(8);
     grid.set(4, 4, TILE_BLOCKED);
     const f = buildFlowField(grid, grid.index(4, 4));
-    expect(f.dist[grid.index(0, 0)]).toBe(FLOW_UNREACHABLE);
+    expect(f.distAt(grid.index(0, 0))).toBe(FLOW_UNREACHABLE);
   });
 
   it("is reproducible", () => {
@@ -149,6 +152,77 @@ describe("buildFlowField", () => {
     const b = buildFlowField(grid, grid.index(20, 20));
     expect(Array.from(a.dist)).toEqual(Array.from(b.dist));
     expect(Array.from(a.dir)).toEqual(Array.from(b.dir));
+  });
+});
+
+describe("the window", () => {
+  it("covers a small map whole, so nothing about pathing changes there", () => {
+    expect(flowWindow(64, 64, 32, 32)).toEqual({ minX: 0, minY: 0, width: 64, height: 64 });
+
+    // And the field agrees: every tile has a real index, and the window index
+    // and the map index are the same number.
+    const grid = openGrid(64);
+    const field = buildFlowField(grid, grid.index(32, 32));
+    expect(field.dist.length).toBe(64 * 64);
+    expect(field.localOf(grid.index(63, 63))).toBe(grid.index(63, 63));
+  });
+
+  it("caps a large map at the window size", () => {
+    const win = flowWindow(1024, 1024, 512, 512);
+    expect(win.width).toBe(FLOW_WINDOW);
+    expect(win.height).toBe(FLOW_WINDOW);
+    expect(win.minX).toBe(512 - FLOW_WINDOW / 2);
+  });
+
+  it("clamps to the map rather than truncating at an edge", () => {
+    // A base in the corner is exactly where paths converge, so it gets a
+    // full-size window, not the half of one that fits.
+    const near = flowWindow(1024, 1024, 3, 3);
+    expect(near).toEqual({ minX: 0, minY: 0, width: FLOW_WINDOW, height: FLOW_WINDOW });
+
+    const far = flowWindow(1024, 1024, 1020, 1020);
+    expect(far.minX).toBe(1024 - FLOW_WINDOW);
+    expect(far.minY).toBe(1024 - FLOW_WINDOW);
+  });
+
+  it("costs the same on a huge map as on a small one", () => {
+    const big = new CostGrid(1024, 1024);
+    const field = buildFlowField(big, big.index(512, 512));
+    // The allocation is what would otherwise be five megabytes per cached
+    // destination, and the search is what would otherwise be a million cells.
+    expect(field.dist.length).toBe(FLOW_WINDOW * FLOW_WINDOW);
+  });
+
+  it("gives no direction outside the window, which steers a unit straight in", () => {
+    const big = new CostGrid(1024, 1024);
+    const goal = big.index(512, 512);
+    const field = buildFlowField(big, goal);
+
+    // Just inside the window: a real step toward the goal.
+    expect(field.dirAt(big.index(512 - FLOW_WINDOW / 2 + 1, 512))).toBeGreaterThanOrEqual(0);
+    // Far outside it: nothing, which world.ts reads as "head for the goal".
+    expect(field.dirAt(big.index(20, 20))).toBe(-1);
+    expect(field.distAt(big.index(20, 20))).toBe(FLOW_UNREACHABLE);
+  });
+
+  it("still walks a unit home from inside the window on a huge map", () => {
+    const big = new CostGrid(1024, 1024);
+    big.fillRect(500, 470, 3, 40, TILE_BLOCKED);
+    const field = buildFlowField(big, big.index(512, 512));
+    // Starts on the far side of the wall, well inside the window.
+    expect(walk(big, field, 460, 490).reached).toBe(true);
+  });
+
+  it("does not mistake a window index for a map index", () => {
+    // The bug this guards against is silent: on a windowed map the two index
+    // spaces differ by an offset, and reading one with the other returns a
+    // plausible direction for entirely the wrong tile.
+    const big = new CostGrid(1024, 1024);
+    const goal = big.index(600, 600);
+    const field = buildFlowField(big, goal);
+    expect(field.localOf(goal)).not.toBe(goal);
+    expect(field.distAt(goal)).toBe(0);
+    expect(field.dirAt(goal)).toBe(-1);
   });
 });
 

@@ -9,6 +9,7 @@ import {
   NEEDS_VENT,
 } from "@rts/sim";
 import { describe, expect, it } from "vitest";
+import { fixtureMap } from "./fixture-map.js";
 import { buildContent, defaultContent } from "./index.js";
 import { mapResources } from "./races/map-resources.js";
 import { vanguard } from "./races/vanguard.js";
@@ -78,7 +79,7 @@ describe("schema", () => {
 });
 
 describe("coherence checks", () => {
-  const build = (race: unknown) => () => buildContent([race], mapResources);
+  const build = (race: unknown) => () => buildContent([race], mapResources, [fixtureMap]);
 
   it("rejects a producer that produces something undefined", () => {
     const bad = draft();
@@ -132,17 +133,17 @@ describe("coherence checks", () => {
   });
 
   it("rejects duplicate ids across races", () => {
-    expect(() => buildContent([vanguard, vanguard], mapResources)).toThrow(/duplicate id/);
+    expect(() => buildContent([vanguard, vanguard], mapResources, [fixtureMap])).toThrow(/duplicate id/);
   });
 });
 
 describe("interning", () => {
   it("assigns ids by sorted content id, so definition order cannot matter", () => {
-    const forward = buildContent([vanguard], mapResources);
+    const forward = buildContent([vanguard], mapResources, [fixtureMap]);
     const shuffled = JSON.parse(JSON.stringify(vanguard)) as typeof vanguard;
     shuffled.units.reverse();
     shuffled.buildings.reverse();
-    const backward = buildContent([shuffled], [...mapResources].reverse());
+    const backward = buildContent([shuffled], [...mapResources].reverse(), [fixtureMap]);
 
     expect(backward.id("vanguard.drone")).toBe(forward.id("vanguard.drone"));
     expect(backward.hash).toBe(forward.hash);
@@ -177,15 +178,15 @@ describe("interning", () => {
       range: 1,
       cooldown: 0.05,
     };
-    const set = buildContent([bad], mapResources);
+    const set = buildContent([bad], mapResources, [fixtureMap]);
     expect(set.types.get(set.id("vanguard.trooper")).cooldown).toBeGreaterThanOrEqual(1);
   });
 });
 
 describe("content hash", () => {
   it("is stable across rebuilds of the same content", () => {
-    expect(buildContent([vanguard], mapResources).hash).toBe(
-      buildContent([vanguard], mapResources).hash,
+    expect(buildContent([vanguard], mapResources, [fixtureMap]).hash).toBe(
+      buildContent([vanguard], mapResources, [fixtureMap]).hash,
     );
   });
 
@@ -199,8 +200,8 @@ describe("content hash", () => {
     )!;
     trooper.maxHealth = (trooper.maxHealth as number) + 1;
 
-    expect(buildContent([tweaked], mapResources).hash).not.toBe(
-      buildContent([vanguard], mapResources).hash,
+    expect(buildContent([tweaked], mapResources, [fixtureMap]).hash).not.toBe(
+      buildContent([vanguard], mapResources, [fixtureMap]).hash,
     );
   });
 
@@ -221,8 +222,8 @@ describe("content hash", () => {
       }
     }
 
-    const before = buildContent([vanguard], mapResources).hash;
-    expect(buildContent([renamed], mapResources).hash).not.toBe(before);
+    const before = buildContent([vanguard], mapResources, [fixtureMap]).hash;
+    expect(buildContent([renamed], mapResources, [fixtureMap]).hash).not.toBe(before);
   });
 
   it("does not change when only presentation text changes", () => {
@@ -230,8 +231,8 @@ describe("content hash", () => {
     // different marketing sentence would be absurd.
     const reworded = draft();
     reworded.blurb = "Completely different flavour text.";
-    expect(buildContent([reworded], mapResources).hash).toBe(
-      buildContent([vanguard], mapResources).hash,
+    expect(buildContent([reworded], mapResources, [fixtureMap]).hash).toBe(
+      buildContent([vanguard], mapResources, [fixtureMap]).hash,
     );
   });
 });

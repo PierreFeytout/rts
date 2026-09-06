@@ -1,4 +1,4 @@
-import { defaultContent, buildContent, vanguard, mapResources } from "@rts/content";
+import { defaultContent, buildContent, fixtureMap, vanguard, mapResources } from "@rts/content";
 import {
   CMD_ATTACK_MOVE,
   CMD_BUILD,
@@ -366,7 +366,7 @@ describe("the content handshake", () => {
     // exactly the wrong place.
     const tweaked = JSON.parse(JSON.stringify(vanguard)) as typeof vanguard;
     tweaked.units[1].maxHealth += 1;
-    const otherHash = buildContent([tweaked], mapResources).hash;
+    const otherHash = buildContent([tweaked], mapResources, [fixtureMap]).hash;
 
     const h = makeHarness({ guestContent: otherHash });
 

@@ -23,6 +23,16 @@ export interface JoinOptions {
   /** `ws://host:port`, or a bare `host:port` which is normalised. */
   address: string;
   /**
+   * An already-open socket to join over, instead of dialling a new one.
+   *
+   * This is how a guest goes from the lobby into the match: the lobby is
+   * conducted over the connection the match then uses, so there is no second
+   * handshake and no window in which the host has started and the guest is
+   * still dialling. Omitted -- which is what the reconnector does -- a fresh
+   * connection is opened.
+   */
+  transport?: SocketTransport;
+  /**
    * The world to restore into.
    *
    * The same object across reconnects, deliberately: the renderer, the
@@ -122,9 +132,10 @@ export function openTransport(address: string): Promise<SocketTransport> {
  */
 export async function joinMatch(options: JoinOptions): Promise<GuestConnection> {
   const say = (message: string): void => options.onStatus?.(message);
-  say("connecting...");
+  const reused = options.transport !== undefined;
+  if (!reused) say("connecting...");
 
-  const transport = await openTransport(options.address);
+  const transport = options.transport ?? (await openTransport(options.address));
   if (transport.localPeer === HOST_PEER) {
     // Peer 0 means the relay had no host yet: this player arrived at a machine
     // that is listening but not playing. Joining as the arbiter of an empty
@@ -142,7 +153,10 @@ export async function joinMatch(options: JoinOptions): Promise<GuestConnection> 
       settled = true;
       window.clearTimeout(timer);
       session.close();
-      transport.close();
+      // A socket this function opened is this function's to clean up. One
+      // handed in belongs to the caller, who is still holding it and may want
+      // to show the player why the join failed before closing it.
+      if (!reused) transport.close();
       reject(new Error(reason));
     };
 

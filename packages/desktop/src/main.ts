@@ -103,7 +103,11 @@ async function beginHosting(): Promise<HostInfo> {
 
   const running = await startRelay({
     port: DEFAULT_PORT,
-    onRoster: (players) => window?.webContents.send("rts:roster", players),
+    // Logged, not forwarded to the renderer. The lobby shows a real roster --
+    // names, races, who is connected -- built from the host's own lobby state,
+    // and a second mechanism carrying a bare connection count would only be a
+    // wrong answer for anyone who reached for it first.
+    onRoster: (players) => console.log(`[rts] ${players} connected`),
   });
   hosting = running;
 
@@ -122,6 +126,13 @@ async function beginHosting(): Promise<HostInfo> {
 }
 
 ipcMain.handle("rts:host", beginHosting);
+
+// The menu's Quit entry. `app.quit()` runs the before-quit handler, so hosting
+// is torn down and the forwarded port released on the way out -- closing the
+// window by hand does the same thing, and the two must not diverge.
+ipcMain.handle("rts:quit", (): void => {
+  app.quit();
+});
 
 ipcMain.handle("rts:stop-hosting", async (): Promise<void> => {
   await stopHosting();

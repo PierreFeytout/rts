@@ -22,6 +22,7 @@ import {
   hashNumber,
   type EntityType,
 } from "@rts/sim";
+import { buildMaps, hashMaps, type MapInfo } from "./map.js";
 import {
   TICKS_PER_SECOND,
   parseRace,
@@ -74,6 +75,8 @@ export interface ContentSet {
   /** The table the simulation runs on. */
   readonly types: TypeTable;
   readonly races: readonly RaceInfo[];
+  /** Playable maps, in definition order. Never empty. */
+  readonly maps: readonly MapInfo[];
   /** Shared map scenery: ore patches and vents, in definition order. */
   readonly resources: readonly number[];
   /**
@@ -90,6 +93,7 @@ export interface ContentSet {
   /** The content id a numeric id came from, for diagnostics and save files. */
   contentIdOf(typeId: number): string;
   race(raceId: string): RaceInfo;
+  map(mapId: string): MapInfo;
 }
 
 /** A Q16.16 distance rounded up to whole tiles, for comparing against vision. */
@@ -147,7 +151,11 @@ function abilities(names: readonly string[], what: string): number {
  * shipped races and a hypothetical mod folder must go through the same door,
  * or the schema is only ever checking things that were already correct.
  */
-export function buildContent(rawRaces: readonly unknown[], rawResources: readonly unknown[]): ContentSet {
+export function buildContent(
+  rawRaces: readonly unknown[],
+  rawResources: readonly unknown[],
+  rawMaps: readonly unknown[],
+): ContentSet {
   const races = rawRaces.map(parseRace);
   const resources = rawResources.map(parseResource);
 
@@ -196,11 +204,21 @@ export function buildContent(rawRaces: readonly unknown[], rawResources: readonl
 
   const resourceIds = resources.map((r) => idOf(r.id, "resources"));
 
+  // Checked against the largest headquarters any race fields, so a start
+  // position is legal for whoever ends up spawning there rather than for
+  // whichever race the map's author had in mind.
+  const hqFootprint = raceInfos.reduce(
+    (largest, race) => Math.max(largest, table.get(race.startBuilding).footprint),
+    1,
+  );
+  const maps = buildMaps(rawMaps, table, idOf, hqFootprint);
+
   return {
     types: table,
     races: raceInfos,
+    maps,
     resources: resourceIds,
-    hash: hashContent(table, raceInfos, byNumber),
+    hash: hashContent(table, raceInfos, byNumber, maps),
     id(contentId: string): number {
       return idOf(contentId, "lookup");
     },
@@ -212,6 +230,11 @@ export function buildContent(rawRaces: readonly unknown[], rawResources: readonl
     race(raceId: string): RaceInfo {
       const found = raceInfos.find((r) => r.id === raceId);
       if (found === undefined) throw new Error(`content: unknown race '${raceId}'`);
+      return found;
+    },
+    map(mapId: string): MapInfo {
+      const found = maps.find((m) => m.id === mapId);
+      if (found === undefined) throw new Error(`content: unknown map '${mapId}'`);
       return found;
     },
   };
@@ -439,6 +462,7 @@ function hashContent(
   table: TypeTable,
   races: readonly RaceInfo[],
   byNumber: readonly string[],
+  maps: readonly MapInfo[],
 ): number {
   let h = hashInit();
 
@@ -476,6 +500,8 @@ function hashContent(
     h = hashNumber(h, race.startBuilding);
     h = hashNumber(h, race.startUnit);
   }
+
+  h = hashMaps(h, maps);
 
   return hashFinish(h);
 }

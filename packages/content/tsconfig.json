@@ -5,11 +5,13 @@
     "types": [],
     "rootDir": "src",
     "outDir": "dist",
+    // Maps are authored as data files rather than as TypeScript. See map-schema.ts.
+    "resolveJsonModule": true,
     "paths": {
       "@rts/sim": ["../sim/src/index.ts"]
     }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.json"],
   "exclude": ["src/**/*.test.ts"],
   "references": [{ "path": "../sim" }]
 }

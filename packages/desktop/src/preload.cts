@@ -15,10 +15,6 @@ contextBridge.exposeInMainWorld("rtsDesktop", {
   host: () => ipcRenderer.invoke("rts:host"),
   /** Stop listening and drop every connected player. */
   stopHosting: () => ipcRenderer.invoke("rts:stop-hosting"),
-  /** Roster changes, for the lobby's player count. */
-  onRoster: (handler: (players: number) => void) => {
-    const listener = (_event: unknown, players: number): void => handler(players);
-    ipcRenderer.on("rts:roster", listener);
-    return () => ipcRenderer.removeListener("rts:roster", listener);
-  },
+  /** Close the game from its own main menu, as a desktop application should. */
+  quit: () => ipcRenderer.invoke("rts:quit"),
 });

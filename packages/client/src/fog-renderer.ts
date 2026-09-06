@@ -12,10 +12,15 @@ import * as THREE from "three";
  * few things that stand *above* it are dimmed by per-instance colour instead,
  * which they already support.
  *
- * The texture is one texel per map tile, linearly filtered. That is deliberately
- * soft: fog with hard tile edges reads as a bug, and the exact boundary is not
- * information the player is meant to act on -- what matters is roughly where
- * sight ends.
+ * The texture is one texel per map tile up to `MAX_TEXELS`, and coarser beyond
+ * it, linearly filtered. That is deliberately soft: fog with hard tile edges
+ * reads as a bug, and the exact boundary is not information the player is meant
+ * to act on -- what matters is roughly where sight ends.
+ *
+ * The cap is not cosmetic. This texture is rebuilt and re-uploaded on every
+ * simulation tick; at one texel per tile a 1024-tile map is four megabytes
+ * twenty times a second, which is more bandwidth than everything else the
+ * renderer does put together. Capped, the upload is the same on every map.
  *
  * The texture carries ALPHA ONLY; the colour lives on the material. That is not
  * tidiness. A `DataTexture` has no colour space, so three.js reads its RGB as
@@ -25,6 +30,16 @@ import * as THREE from "three";
  * perfectly and was invisible. Material colours go through the sRGB conversion
  * properly, so putting the colour there makes the tone mean what it says.
  */
+
+/**
+ * Widest fog texture, in texels.
+ *
+ * Beyond this the map is sampled at a stride. Safe because the smallest sight
+ * radius in the content is 6 tiles, so any patch of visible ground is at least
+ * a dozen tiles across and cannot slip between samples -- and because the
+ * result is blurred by linear filtering anyway.
+ */
+const MAX_TEXELS = 256;
 
 /** Darkness of never-seen ground. Fully opaque: there is nothing to show. */
 const ALPHA_HIDDEN = 1;
@@ -36,6 +51,10 @@ export class FogRenderer {
   private readonly data: Uint8Array;
   private readonly mesh: THREE.Mesh;
   private readonly mapTiles: number;
+  /** Map tiles per texel. 1 on any map at or below MAX_TEXELS. */
+  private readonly stride: number;
+  /** Texture extent, in texels. */
+  private readonly texels: number;
   private readonly localPlayer: number;
 
   /** Tick the texture was last built from, so it is not rebuilt per frame. */
@@ -44,13 +63,15 @@ export class FogRenderer {
 
   constructor(scene: THREE.Scene, mapTiles: number, localPlayer: number) {
     this.mapTiles = mapTiles;
+    this.stride = Math.ceil(mapTiles / MAX_TEXELS);
+    this.texels = Math.ceil(mapTiles / this.stride);
     this.localPlayer = localPlayer;
 
     // Luminance-alpha would be ideal; three.js dropped it, so RGBA it is.
     // RGB stays pure white so it cannot tint the material's colour, and only
     // the alpha channel carries any information.
-    this.data = new Uint8Array(mapTiles * mapTiles * 4).fill(255);
-    this.texture = new THREE.DataTexture(this.data, mapTiles, mapTiles, THREE.RGBAFormat);
+    this.data = new Uint8Array(this.texels * this.texels * 4).fill(255);
+    this.texture = new THREE.DataTexture(this.data, this.texels, this.texels, THREE.RGBAFormat);
     this.texture.magFilter = THREE.LinearFilter;
     this.texture.minFilter = THREE.LinearFilter;
     this.texture.needsUpdate = true;
@@ -92,7 +113,10 @@ export class FogRenderer {
     }
     this.mesh.visible = true;
 
-    const n = this.mapTiles;
+    const n = this.texels;
+    // Sample the middle of each block rather than its corner, so a stride
+    // wider than one tile does not bias the fog toward the map's origin.
+    const offset = this.stride >> 1;
     for (let ty = 0; ty < n; ty++) {
       // Rows are written bottom-up. The plane's v axis runs from world south to
       // world north once it is laid flat, and `flipY` -- which exists for
@@ -102,8 +126,10 @@ export class FogRenderer {
       // convincingly like fog right up until you notice the lit patch is over
       // the enemy's base rather than your own.
       let out = (n - 1 - ty) * n * 4;
+      const sy = Math.min(ty * this.stride + offset, this.mapTiles - 1);
       for (let tx = 0; tx < n; tx++) {
-        const level = vision.levelAt(this.localPlayer, tx, ty);
+        const sx = Math.min(tx * this.stride + offset, this.mapTiles - 1);
+        const level = vision.levelAt(this.localPlayer, sx, sy);
         const alpha =
           level === VIS_VISIBLE ? 0 : level === VIS_HIDDEN ? ALPHA_HIDDEN : ALPHA_EXPLORED;
         this.data[out + 3] = (alpha * 255) | 0;

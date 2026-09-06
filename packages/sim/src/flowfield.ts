@@ -15,6 +15,24 @@ import type { CostGrid } from "./grid.js";
  * peer that evicts a field and recomputes it gets bit-identical results, so
  * cache policy cannot cause a desync. Only *invalidation* must be correct, and
  * that is handled by comparing the grid version.
+ *
+ * THE WINDOW
+ * ----------
+ * A field covers at most `FLOW_WINDOW` tiles square, centred on the goal. On a
+ * 1024-tile map an unwindowed field is a million-cell Dijkstra and five
+ * megabytes per cached destination -- tens of milliseconds against a 50 ms tick
+ * budget, for one order. Windowed, the cost of a field is the same on every map
+ * size.
+ *
+ * A unit outside the window reads no direction and steers straight at its
+ * destination until it enters, which is the same fallback already used for a
+ * unit standing in the goal tile. Crossing half a continent is therefore
+ * navigated crudely and the last few hundred tiles precisely, which is the
+ * right way round.
+ *
+ * The window is derived from the goal alone. That matters: it keeps a field a
+ * pure function of (grid, goal), so the cache key is unchanged and two peers
+ * cannot window differently.
  */
 
 /** Cost of an orthogonal step. Scaled by 10 so the diagonal stays an integer. */
@@ -25,6 +43,15 @@ const COST_DIAGONAL = 14;
 /** Unreachable. Large enough to never be produced by a real path. */
 export const FLOW_UNREACHABLE = 0x7fffffff;
 
+/**
+ * Widest field, in tiles.
+ *
+ * 256 is the size of the largest map that predates windowing, so every map at
+ * or below it is covered whole and behaves exactly as before. Above it, this is
+ * the constant that keeps pathing cost independent of map size.
+ */
+export const FLOW_WINDOW = 256;
+
 /** Neighbour offsets, east then clockwise (remember +y is south). */
 export const DIR_X = new Int8Array([1, 1, 0, -1, -1, -1, 0, 1]);
 export const DIR_Y = new Int8Array([0, 1, 1, 1, 0, -1, -1, -1]);
@@ -34,17 +61,91 @@ const DIR_DIAGONAL = [false, true, false, true, false, true, false, true];
 export class FlowField {
   readonly goal: number;
   readonly gridVersion: number;
-  /** Integrated cost from each tile to the goal. */
+
+  /** Window origin in map tiles. */
+  readonly minX: number;
+  readonly minY: number;
+  /** Window extent in tiles. */
+  readonly width: number;
+  readonly height: number;
+  /** Width of the map this field was built for, to decode cell indices. */
+  readonly gridWidth: number;
+
+  /**
+   * Integrated cost to the goal, indexed by *window* cell.
+   *
+   * Use `distAt`/`dirAt` with a map cell index rather than indexing these
+   * directly -- the two index spaces differ on any map wider than the window,
+   * and reading one with the other's index is silently wrong rather than out
+   * of bounds.
+   */
   readonly dist: Int32Array;
   /** Index into DIR_X/DIR_Y pointing one step toward the goal, or -1. */
   readonly dir: Int8Array;
 
-  constructor(goal: number, gridVersion: number, size: number) {
+  constructor(
+    goal: number,
+    gridVersion: number,
+    gridWidth: number,
+    minX: number,
+    minY: number,
+    width: number,
+    height: number,
+  ) {
     this.goal = goal;
     this.gridVersion = gridVersion;
-    this.dist = new Int32Array(size);
-    this.dir = new Int8Array(size);
+    this.gridWidth = gridWidth;
+    this.minX = minX;
+    this.minY = minY;
+    this.width = width;
+    this.height = height;
+    this.dist = new Int32Array(width * height);
+    this.dir = new Int8Array(width * height);
   }
+
+  /** Window cell for a map cell, or -1 when the tile lies outside the window. */
+  localOf(cell: number): number {
+    const x = (cell % this.gridWidth) - this.minX;
+    const y = ((cell / this.gridWidth) | 0) - this.minY;
+    if (x < 0 || y < 0 || x >= this.width || y >= this.height) return -1;
+    return y * this.width + x;
+  }
+
+  /** Step toward the goal from a map cell, or -1 if there is none to take. */
+  dirAt(cell: number): number {
+    const local = this.localOf(cell);
+    return local < 0 ? -1 : this.dir[local];
+  }
+
+  /** Integrated cost from a map cell, or FLOW_UNREACHABLE outside the window. */
+  distAt(cell: number): number {
+    const local = this.localOf(cell);
+    return local < 0 ? FLOW_UNREACHABLE : this.dist[local];
+  }
+}
+
+/**
+ * The window a goal produces on a given grid.
+ *
+ * Clamped to the map, so a goal near an edge still gets a full-size window
+ * rather than a truncated one -- a base in the corner is exactly where paths
+ * converge, and it is the last place to be stingy with field coverage.
+ */
+export function flowWindow(
+  width: number,
+  height: number,
+  goalX: number,
+  goalY: number,
+): { minX: number; minY: number; width: number; height: number } {
+  const w = width < FLOW_WINDOW ? width : FLOW_WINDOW;
+  const h = height < FLOW_WINDOW ? height : FLOW_WINDOW;
+  let minX = goalX - (w >> 1);
+  let minY = goalY - (h >> 1);
+  if (minX < 0) minX = 0;
+  if (minY < 0) minY = 0;
+  if (minX + w > width) minX = width - w;
+  if (minY + h > height) minY = height - h;
+  return { minX, minY, width: w, height: h };
 }
 
 /**
@@ -144,18 +245,26 @@ class MinHeap {
 export function buildFlowField(grid: CostGrid, goal: number, scratchHeap?: MinHeap): FlowField {
   const heap = scratchHeap ?? new MinHeap(4096);
   const { width, height } = grid;
-  const field = new FlowField(goal, grid.version, width * height);
+
+  const goalX = goal % width;
+  const goalY = (goal / width) | 0;
+  const win = flowWindow(width, height, goalX, goalY);
+  const field = new FlowField(goal, grid.version, width, win.minX, win.minY, win.width, win.height);
 
   field.dist.fill(FLOW_UNREACHABLE);
   field.dir.fill(-1);
 
-  const goalX = goal % width;
-  const goalY = (goal / width) | 0;
   if (!grid.inBounds(goalX, goalY) || grid.isBlocked(goalX, goalY)) return field;
 
+  // Everything below works in window coordinates; `grid` is always consulted in
+  // map coordinates. Keeping the two apart is the whole subtlety here, so the
+  // window-local names carry an `l` prefix.
+  const lw = win.width;
+  const goalLocal = (goalY - win.minY) * lw + (goalX - win.minX);
+
   heap.clear();
-  field.dist[goal] = 0;
-  heap.push(goal, 0);
+  field.dist[goalLocal] = 0;
+  heap.push(goalLocal, 0);
 
   while (heap.pop()) {
     const cell = heap.topCell;
@@ -163,13 +272,20 @@ export function buildFlowField(grid: CostGrid, goal: number, scratchHeap?: MinHe
     // Stale entry left behind by lazy deletion.
     if (d > field.dist[cell]) continue;
 
-    const cx = cell % width;
-    const cy = (cell / width) | 0;
+    const lx = cell % lw;
+    const ly = (cell / lw) | 0;
+    const cx = lx + win.minX;
+    const cy = ly + win.minY;
 
     for (let dir = 0; dir < 8; dir++) {
+      const lnx = lx + DIR_X[dir];
+      const lny = ly + DIR_Y[dir];
+      // The window edge is a wall as far as the search is concerned. Units
+      // beyond it steer straight at the destination until they cross in.
+      if (lnx < 0 || lny < 0 || lnx >= lw || lny >= win.height) continue;
+
       const nx = cx + DIR_X[dir];
       const ny = cy + DIR_Y[dir];
-      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
       if (grid.isBlocked(nx, ny)) continue;
 
       // Refuse to cut corners: a diagonal step is only legal when both
@@ -180,7 +296,7 @@ export function buildFlowField(grid: CostGrid, goal: number, scratchHeap?: MinHe
 
       const step = DIR_DIAGONAL[dir] ? COST_DIAGONAL : COST_STRAIGHT;
       const nd = d + step;
-      const n = ny * width + nx;
+      const n = lny * lw + lnx;
       if (nd >= field.dist[n]) continue;
 
       field.dist[n] = nd;

@@ -41,6 +41,15 @@ export class Minimap {
   private readonly rig: IsoCamera;
   private readonly localPlayer: number;
   private readonly scale: number;
+  /**
+   * Tiles per fog sample.
+   *
+   * The canvas is `SIZE` pixels across, so on a 1024-tile map one pixel already
+   * covers five tiles and sampling every tile is nearly thirty times more work
+   * than the display can show. Redrawn at 15 Hz, that is the difference between
+   * a minimap and a stutter.
+   */
+  private readonly fogStep: number;
 
   private terrainVersion = -1;
   private lastDraw = 0;
@@ -52,6 +61,7 @@ export class Minimap {
     this.rig = rig;
     this.localPlayer = localPlayer;
     this.scale = SIZE / world.mapTiles;
+    this.fogStep = Math.max(1, Math.floor(world.mapTiles / SIZE));
 
     this.canvas = document.createElement("canvas");
     this.canvas.width = SIZE;
@@ -117,16 +127,18 @@ export class Minimap {
     const vision = this.world.vision;
     if (vision.enabled) {
       ctx.fillStyle = "#070a10";
-      for (let ty = 0; ty < this.world.mapTiles; ty++) {
+      const n = this.world.mapTiles;
+      const step = this.fogStep;
+      for (let ty = 0; ty < n; ty += step) {
         let runStart = -1;
         let runAlpha = -1;
-        for (let tx = 0; tx <= this.world.mapTiles; tx++) {
-          const level = tx < this.world.mapTiles ? vision.levelAt(this.localPlayer, tx, ty) : -1;
+        for (let tx = 0; tx <= n; tx += step) {
+          const level = tx < n ? vision.levelAt(this.localPlayer, tx, ty) : -1;
           const alpha = level === VIS_VISIBLE ? 0 : level === VIS_HIDDEN ? 1 : 0.5;
           if (alpha !== runAlpha) {
             if (runAlpha > 0 && runStart >= 0) {
               ctx.globalAlpha = runAlpha;
-              ctx.fillRect(runStart * s, ty * s, (tx - runStart) * s, s + 1);
+              ctx.fillRect(runStart * s, ty * s, (tx - runStart) * s, step * s + 1);
             }
             runStart = tx;
             runAlpha = alpha;

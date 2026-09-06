@@ -4,6 +4,11 @@ import { decodeMessage, encodeMessage, tryDecodeMessage } from "./codec.js";
 import {
   MSG_HASH,
   MSG_HELLO,
+  MSG_LOBBY_CLOSED,
+  MSG_LOBBY_HELLO,
+  MSG_LOBBY_PICK,
+  MSG_LOBBY_START,
+  MSG_LOBBY_STATE,
   MSG_SCHEDULE,
   MSG_SNAPSHOT,
   MSG_SUBMIT,
@@ -155,5 +160,55 @@ describe("codec", () => {
     };
     const size = encodeMessage(m).byteLength;
     expect(size, `${size} bytes for a 200-unit order`).toBeLessThan(1200);
+  });
+});
+
+describe("the lobby messages", () => {
+  it("round-trips a lobby hello", () => {
+    const m: Message = {
+      t: MSG_LOBBY_HELLO,
+      protocol: PROTOCOL_VERSION,
+      contentHash: 0x1234abcd,
+      token: "abc123",
+      name: "pierre",
+    };
+    expect(roundTrip(m)).toEqual(m);
+  });
+
+  it("round-trips the whole lobby, slot for slot", () => {
+    // The host sends all of it every time any of it changes, so a codec that
+    // dropped one slot's race would show two players different lobbies and
+    // only surface at the loading screen.
+    const m: Message = {
+      t: MSG_LOBBY_STATE,
+      mapId: "rift-basin",
+      seed: 0x7f3a21c0,
+      yourSlot: 2,
+      slots: [
+        { kind: "human", raceId: "vanguard", name: "Ada", connected: true },
+        { kind: "computer", raceId: "concord", name: "Computer 2", connected: false },
+        { kind: "human", raceId: "concord", name: "Cy", connected: true },
+        { kind: "empty", raceId: "vanguard", name: "Computer 4", connected: false },
+      ],
+    };
+    expect(roundTrip(m)).toEqual(m);
+  });
+
+  it("round-trips a race pick", () => {
+    const m: Message = { t: MSG_LOBBY_PICK, raceId: "concord" };
+    expect(roundTrip(m)).toEqual(m);
+  });
+
+  it("round-trips a start, carrying the map size", () => {
+    // The guest builds its world from this before the snapshot arrives, and
+    // `decodeSnapshot` refuses a size mismatch rather than reading past the end
+    // of a grid -- so a wrong number here is a failed join, not a wrong map.
+    const m: Message = { t: MSG_LOBBY_START, mapTiles: 1024 };
+    expect(roundTrip(m)).toEqual(m);
+  });
+
+  it("round-trips a closure", () => {
+    const m: Message = { t: MSG_LOBBY_CLOSED, reason: "that match has already begun" };
+    expect(roundTrip(m)).toEqual(m);
   });
 });
