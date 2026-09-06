@@ -37,6 +37,24 @@ To build installers:
 npm run package    # writes to release/
 ```
 
+The Electron main process is **bundled** (`scripts/build-desktop.mjs`) rather
+than shipped as separate files. That is not a size optimisation: npm workspaces
+link local packages by symlink, symlinks do not survive into an `app.asar`, and
+the first packaged build installed cleanly and then died on launch with
+`ERR_MODULE_NOT_FOUND: Cannot find package '@rts/transport'`. Bundling resolves
+every workspace and npm import at build time, so the shipped main process
+imports nothing but `electron` and Node built-ins.
+
+To check a build without clicking anything:
+
+```bash
+RTS_SMOKE=1 npx electron release/win-unpacked/resources/app.asar
+```
+
+It opens the listening socket, reports the addresses and the port-forwarding
+outcome, and quits. That is the check that would have caught the packaging bug:
+the failure only appeared once a real build tried to open a real socket.
+
 **How to actually play:** pick a faction lineup, drag a box over your workers,
 right-click an amber ore crystal to start mining, then click a worker and use
 the command card at the bottom to place a supply building and a factory. Select
@@ -757,6 +775,19 @@ Learned while building this, recorded so they are not re-learned:
 - **`prefer-const` and mutually-referential closures.** Two ends of one pipe each
   need the other; a holder object breaks the cycle without either being
   reassigned, which is clearer than silencing the rule.
+- **Listing a workspace package's files is not the same as making it
+  resolvable.** `packages/transport/dist` was inside the asar and the app still
+  could not `import "@rts/transport"`, because nothing created a `node_modules`
+  entry for it. Bundling the main process is the fix; a comment claiming two
+  electron-builder flags handled it was simply wrong.
+- **A packaged app is a different program.** It worked from source, from `dist`,
+  and unpacked; it failed only once assembled into an archive. Anything that
+  can only break at packaging time has to be tested at packaging time, which is
+  what `RTS_SMOKE=1` is for.
+- **Many consumer routers reject a UPnP lease duration outright**, answering 500
+  to any non-zero value and accepting only permanent mappings. Retrying with a
+  lease of zero is the difference between "your router refused" and a game that
+  works.
 
 ## Debug tooling
 

@@ -29,7 +29,13 @@ import { URL } from "node:url";
 
 /** How long to wait for any single router response. Routers are slow but local. */
 const TIMEOUT_MS = 2500;
-/** Lease length requested, in seconds. Renewed while the game is hosting. */
+/**
+ * Lease length requested, in seconds.
+ *
+ * A lease means an abandoned mapping expires on its own rather than leaving a
+ * hole in the player's router forever. Routers that refuse a lease get a
+ * permanent mapping instead -- see the retry in `tryUpnp`.
+ */
 const LEASE_SECONDS = 3600;
 
 export interface ForwardResult {
@@ -170,19 +176,26 @@ async function tryUpnp(port: number): Promise<ForwardResult> {
     const local = localAddress();
     if (!local) return fail("upnp", "could not determine this machine's address");
 
-    await soap(
-      controlUrl,
-      serviceType,
-      "AddPortMapping",
+    const mapping = (lease: number): string =>
       `<NewRemoteHost></NewRemoteHost>` +
-        `<NewExternalPort>${port}</NewExternalPort>` +
-        `<NewProtocol>TCP</NewProtocol>` +
-        `<NewInternalPort>${port}</NewInternalPort>` +
-        `<NewInternalClient>${local}</NewInternalClient>` +
-        `<NewEnabled>1</NewEnabled>` +
-        `<NewPortMappingDescription>RTS</NewPortMappingDescription>` +
-        `<NewLeaseDuration>${LEASE_SECONDS}</NewLeaseDuration>`,
-    );
+      `<NewExternalPort>${port}</NewExternalPort>` +
+      `<NewProtocol>TCP</NewProtocol>` +
+      `<NewInternalPort>${port}</NewInternalPort>` +
+      `<NewInternalClient>${local}</NewInternalClient>` +
+      `<NewEnabled>1</NewEnabled>` +
+      `<NewPortMappingDescription>RTS</NewPortMappingDescription>` +
+      `<NewLeaseDuration>${lease}</NewLeaseDuration>`;
+
+    try {
+      await soap(controlUrl, serviceType, "AddPortMapping", mapping(LEASE_SECONDS));
+    } catch (leaseError) {
+      // A great many consumer routers answer 500 to any non-zero lease and only
+      // accept permanent mappings. Retrying with zero is the difference between
+      // "your router refused" and a game that just works, and it is by far the
+      // most common reason a first attempt fails.
+      void leaseError;
+      await soap(controlUrl, serviceType, "AddPortMapping", mapping(0));
+    }
 
     let externalIp: string | null = null;
     try {

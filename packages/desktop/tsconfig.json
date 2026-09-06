@@ -7,7 +7,11 @@
     "lib": ["ES2022"],
     "types": ["node"],
     "rootDir": "src",
-    "outDir": "dist",
+    // Declarations only. esbuild produces the runtime files in `dist`, because
+    // tsc emits bare `@rts/transport` imports that cannot resolve inside a
+    // packaged asar -- see scripts/build-desktop.mjs.
+    "outDir": "dist-types",
+    "emitDeclarationOnly": true,
     "paths": {
       "@rts/transport": ["../transport/src/index.ts"]
     }

@@ -12,22 +12,23 @@ directories:
   output: release
   buildResources: build
 
-# Only what the app loads at runtime. The whole toolchain -- TypeScript, Vite,
-# Electron itself, every test -- stays out, which is the difference between a
-# ~200 MB download and a ~600 MB one.
+# Only what the app loads at runtime.
+#
+# The main process is bundled (scripts/build-desktop.mjs), so it imports nothing
+# but `electron` and Node built-ins -- no workspace packages and no
+# node_modules need shipping. That is not a size optimisation: npm workspaces
+# link local packages by symlink, symlinks do not survive into an asar, and the
+# first packaged build died on launch with
+# `ERR_MODULE_NOT_FOUND: Cannot find package '@rts/transport'`.
 files:
   - packages/desktop/dist/**/*
-  - packages/desktop/package.json
   - packages/client/dist/**/*
-  - packages/transport/dist/**/*
-  - packages/transport/package.json
   - package.json
   - "!**/*.map"
-  - "!**/*.d.ts"
 
-# npm workspaces link local packages by symlink; electron-builder has to follow
-# them or the app ships with an unresolvable `@rts/transport` import.
-buildDependenciesFromSource: false
+# Nothing native is bundled, so there is nothing to rebuild against Electron's
+# ABI. `ws` uses optional native accelerators and falls back to JavaScript when
+# they are absent, which is exactly what happens here.
 npmRebuild: false
 
 win:

@@ -97,7 +97,7 @@ function createWindow(): void {
 // The bridge the renderer talks to
 // ---------------------------------------------------------------------------
 
-ipcMain.handle("rts:host", async (): Promise<HostInfo> => {
+async function beginHosting(): Promise<HostInfo> {
   // Hosting twice would leave the first relay listening with nobody attached.
   if (hosting) await stopHosting();
 
@@ -119,7 +119,9 @@ ipcMain.handle("rts:host", async (): Promise<HostInfo> => {
     publicAddress: forwarding.externalIp ? `${forwarding.externalIp}:${running.port}` : null,
     forwarding,
   };
-});
+}
+
+ipcMain.handle("rts:host", beginHosting);
 
 ipcMain.handle("rts:stop-hosting", async (): Promise<void> => {
   await stopHosting();
@@ -134,10 +136,42 @@ async function stopHosting(): Promise<void> {
 
 // ---------------------------------------------------------------------------
 
-app.whenReady().then(createWindow, (error: unknown) => {
-  console.error("[rts] failed to start:", error);
-  app.quit();
-});
+/**
+ * Start the relay, report, and quit -- without opening a window.
+ *
+ * `RTS_SMOKE=1 <app>` answers "does hosting work in this build" on a machine
+ * where nobody can click the button. It is the check that would have caught the
+ * packaging bug that shipped: the failure was a module the bundler had not
+ * inlined, and it only appeared once a real build tried to open a real socket.
+ */
+async function smokeTest(): Promise<void> {
+  try {
+    const info = await beginHosting();
+    console.log(`[rts] smoke: listening on ${info.port}`);
+    console.log(`[rts] smoke: lan ${info.lanAddress ?? "unknown"}`);
+    console.log(`[rts] smoke: public ${info.publicAddress ?? "unknown"}`);
+    console.log(`[rts] smoke: forwarding ${info.forwarding.method} -- ${info.forwarding.detail}`);
+    console.log("[rts] smoke: ok");
+  } catch (error) {
+    console.error("[rts] smoke: FAILED", error);
+    process.exitCode = 1;
+  } finally {
+    await stopHosting();
+    app.quit();
+  }
+}
+
+app.whenReady().then(
+  () => {
+    if (process.env.RTS_SMOKE) return smokeTest();
+    createWindow();
+    return undefined;
+  },
+  (error: unknown) => {
+    console.error("[rts] failed to start:", error);
+    app.quit();
+  },
+);
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
