@@ -6,6 +6,7 @@ import {
   snapshotMapTiles,
   type Command,
 } from "@rts/sim";
+import { music } from "./audio/music.js";
 import { startGame, type RunningGame } from "./game.js";
 import { loadTerrain } from "./materials.js";
 import { createEmptyWorld } from "./match.js";
@@ -26,12 +27,17 @@ import { installStyles } from "./ui.js";
 enableDevChecks(import.meta.env.DEV);
 installStyles();
 
-// Decoded once, before the menu is even shown. Six PNGs take long enough to be
-// a visible hitch, and the moment it would otherwise land is exactly when the
-// player has just pressed Start.
+// Decoded once, before the menu is even shown. Six PNGs and five minutes of
+// audio take long enough to be a visible hitch, and the moment it would
+// otherwise land is exactly when the player has just pressed Start.
+//
+// The music does not block the menu: a failure to decode should cost the
+// soundtrack, not the game.
 const terrain = await loadTerrain();
+void music.load().catch((error: unknown) => console.warn("[rts] no music:", error));
 
 for (;;) {
+  music.scene("menu");
   const launch = await chooseMatch();
   await runMatch(launch);
   await launch.release();

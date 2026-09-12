@@ -1,3 +1,4 @@
+import { music } from "../audio/music.js";
 import { MAX_NAME, playerName, setPlayerName } from "../identity.js";
 import { desktop } from "../desktop.js";
 import { escapeHtml, screen } from "../ui.js";
@@ -90,7 +91,15 @@ function choose<T extends string>(options: ChooseOptions<T>): Promise<T> {
       (options.name
         ? `<label class="rts-field"><span>your name</span>` +
           `<input id="menu-name" maxlength="${MAX_NAME}" autocomplete="off" spellcheck="false" ` +
-          `value="${escapeHtml(playerName())}" /></label><hr />`
+          `value="${escapeHtml(playerName())}" /></label>` +
+          // On the landing screen only. It is a property of the person, like
+          // their name, rather than of any one match -- and this is the screen
+          // everything starts from, so it is always one step away.
+          `<label class="rts-field"><span>music</span>` +
+          `<div class="rts-row"><input id="menu-volume" type="range" min="0" max="100" ` +
+          `step="1" value="${Math.round(music.volume * 100)}" style="flex:1" />` +
+          `<button class="quiet" id="menu-mute" style="padding:6px 12px;min-width:74px">` +
+          `${music.isMuted ? "unmute" : "mute"}</button></div></label><hr />`
         : "") +
       options.entries
         .map(
@@ -101,6 +110,19 @@ function choose<T extends string>(options: ChooseOptions<T>): Promise<T> {
             (entry.note ? `<p class="rts-note" style="margin:-4px 0 12px">${escapeHtml(entry.note)}</p>` : ""),
         )
         .join("");
+
+    const volume = panel.querySelector<HTMLInputElement>("#menu-volume");
+    const mute = panel.querySelector<HTMLButtonElement>("#menu-mute");
+    if (volume) {
+      // `input`, not `change`: the player is listening while they drag, and the
+      // whole point of a volume slider is that it moves the volume.
+      volume.oninput = () => music.setVolume(Number(volume.value) / 100);
+    }
+    if (mute) {
+      mute.onclick = () => {
+        mute.textContent = music.toggleMute() ? "unmute" : "mute";
+      };
+    }
 
     const nameInput = panel.querySelector<HTMLInputElement>("#menu-name");
     // Saved on the way out rather than on every keystroke, and before the

@@ -3,6 +3,7 @@ import type { GuestSession, HostSession } from "@rts/netcode";
 import { TICK_HZ, TICK_MS, hashToString, type Command, type World } from "@rts/sim";
 import * as THREE from "three";
 import type { AiDriver } from "./ai/driver.js";
+import { MusicDirector, music } from "./audio/music.js";
 import { CameraControls } from "./camera-controls.js";
 import { ControlGroups } from "./control-groups.js";
 import { Effects } from "./effects.js";
@@ -183,6 +184,12 @@ export function startGame(options: GameOptions): RunningGame {
   // burst, which is exactly when the most is happening.
   const ai = options.ai ?? new Map<number, AiDriver>();
 
+  // The score follows the match. Reads events only, touches no simulation
+  // state, and is in no hash -- two players can run completely different music
+  // and still agree on every tick.
+  music.scene("match");
+  const conductor = new MusicDirector(localPlayer);
+
   function wireTickHooks(target: MatchSession): void {
     target.onBeforeTick = (w) => {
       // Through `submitLocal`, so a computer player's orders are scheduled at
@@ -195,6 +202,8 @@ export function startGame(options: GameOptions): RunningGame {
     target.onAfterTick = (w) => {
       effects.ingest(w);
       hud.ingest(w);
+      conductor.ingest(w);
+      conductor.update(TICK_MS);
       recorder?.checkpoint(w);
     };
   }
