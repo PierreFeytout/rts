@@ -15,14 +15,23 @@ import {
   type EntityType,
   type World,
 } from "@rts/sim";
+import { css, teamColour } from "./palette.js";
+import { iconFor, portraitFor } from "./portrait.js";
 import type { Selection } from "./selection.js";
+import { escapeHtml, installStyles } from "./ui.js";
 
 /**
- * Resource readout, command card, and match-state banners.
+ * The match console: resources, portrait, and the command card.
+ *
+ * Laid out the way a StarCraft console is -- minimap on the left, who is
+ * selected in the middle, what they can do on the right -- but overlaid on the
+ * rendered world rather than cutting into it, so the map keeps its full height.
+ * The bar between the three bays is transparent and ignores the mouse, which is
+ * what lets a drag-select cross it.
  *
  * Plain DOM rather than anything drawn in WebGL. Text, buttons and hover states
- * are what the browser is already extremely good at, and keeping the HUD out of
- * the scene graph means it costs nothing per frame that it is not changing.
+ * are what the browser is already extremely good at, and keeping the console
+ * out of the scene graph means it costs nothing per frame that is not changing.
  *
  * The card is rebuilt only when the *shape* of the selection changes -- a
  * different set of unit types, or a different queue length. Rebuilding it every
@@ -31,10 +40,27 @@ import type { Selection } from "./selection.js";
 
 const BLOCK_MESSAGES: Record<number, string> = {
   [BLOCKED_RESOURCES]: "not enough resources",
-  [BLOCKED_SUPPLY]: "not enough supply — build a Supply Pylon",
+  [BLOCKED_SUPPLY]: "not enough supply — build a Habstack",
   [BLOCKED_SPACE]: "no room to place that",
   [BLOCKED_QUEUE_FULL]: "production queue is full",
 };
+
+/** Columns in the command card. Three, as the genre has had since 1998. */
+const COLUMNS = 3;
+/** Never fewer rows than this, so the card does not change size as you click. */
+const MIN_ROWS = 3;
+
+/** One thing a command slot can do. */
+interface Action {
+  /** Rendered as the slot's icon. Absent for orders that have no unit to show. */
+  type?: EntityType;
+  label: string;
+  hotkey?: string;
+  cost?: string;
+  affordable: boolean;
+  active: boolean;
+  run: () => void;
+}
 
 export class Hud {
   private readonly world: World;
@@ -42,7 +68,11 @@ export class Hud {
   private readonly emit: (command: Command) => void;
   private readonly selection: Selection;
 
+  private readonly console: HTMLDivElement;
   private readonly resources: HTMLDivElement;
+  /** Where the minimap mounts. Owned here so the console lays it out. */
+  readonly minimapBay: HTMLDivElement;
+  private readonly selected: HTMLDivElement;
   private readonly card: HTMLDivElement;
   private readonly toast: HTMLDivElement;
   private readonly banner: HTMLDivElement;
@@ -52,36 +82,50 @@ export class Hud {
   private toastUntil = 0;
 
   constructor(world: World, localPlayer: number, selection: Selection, emit: (c: Command) => void) {
+    installStyles();
     this.world = world;
     this.localPlayer = localPlayer;
     this.selection = selection;
     this.emit = emit;
 
-    this.resources = panel(
-      "position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:12;" +
-        "padding:8px 18px;display:flex;gap:22px;align-items:center;font-size:15px",
-    );
-    this.card = panel(
-      "position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:12;" +
-        "padding:10px 12px;display:flex;flex-direction:column;gap:8px;align-items:center;" +
-        "max-width:min(900px,92vw)",
-    );
-    this.toast = panel(
-      "position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:13;" +
-        "padding:8px 16px;color:#ffb4a0;border-color:#5a2f2a;display:none",
-    );
-    this.banner = panel(
-      "position:fixed;top:38%;left:50%;transform:translateX(-50%);z-index:14;" +
-        "padding:20px 40px;font-size:26px;letter-spacing:0.12em;text-align:center;display:none",
-    );
+    this.console = document.createElement("div");
+    this.console.className = "rts-console";
+    document.body.appendChild(this.console);
+
+    this.minimapBay = document.createElement("div");
+    this.minimapBay.className = "rts-bay";
+    this.minimapBay.style.cssText = "padding:4px;line-height:0";
+    this.console.appendChild(this.minimapBay);
+
+    this.selected = document.createElement("div");
+    this.selected.className = "rts-bay rts-selected";
+    this.console.appendChild(this.selected);
+
+    this.card = document.createElement("div");
+    this.card.className = "rts-bay";
+    this.console.appendChild(this.card);
+
+    this.resources = document.createElement("div");
+    this.resources.className = "rts-bay rts-resources";
+    document.body.appendChild(this.resources);
+
+    this.toast = document.createElement("div");
+    this.toast.className = "rts-bay rts-toast";
+    this.toast.style.display = "none";
+    document.body.appendChild(this.toast);
+
+    this.banner = document.createElement("div");
+    this.banner.className = "rts-bay rts-outcome";
+    this.banner.style.display = "none";
+    document.body.appendChild(this.banner);
 
     selection.onChange = () => this.rebuildCard();
     this.rebuildCard();
   }
 
   dispose(): void {
+    this.console.remove();
     this.resources.remove();
-    this.card.remove();
     this.toast.remove();
     this.banner.remove();
   }
@@ -102,22 +146,24 @@ export class Hud {
   update(): void {
     const players = this.world.players;
     const p = this.localPlayer;
-    const supplyOver = players.supplyUsed[p] >= players.supplyCap[p];
+    const capped = players.supplyUsed[p] >= players.supplyCap[p];
 
     this.resources.innerHTML =
-      stat("alloy", players.alloy[p], "#e8d08a") +
-      stat("plasma", players.plasma[p], "#8ef0d8") +
+      stat("alloy", players.alloy[p], "var(--alloy)") +
+      stat("plasma", players.plasma[p], "var(--plasma)") +
       stat(
         "supply",
         `${players.supplyUsed[p]} / ${players.supplyCap[p]}`,
-        supplyOver ? "#ff9a8a" : "#bcd4ee",
+        capped ? "var(--bad)" : "var(--text)",
       );
 
     if (performance.now() > this.toastUntil) this.toast.style.display = "none";
 
-    // The queue changes every tick, so its progress is refreshed here rather
-    // than triggering a full card rebuild twenty times a second.
-    this.refreshQueue();
+    // The selection's health and any production queue change every tick, so
+    // they are patched here rather than triggering a full rebuild 20 times a
+    // second. Anything that changes the card's *shape* goes through the
+    // signature check instead.
+    this.refreshSelected();
     this.refreshOutcome();
   }
 
@@ -156,110 +202,257 @@ export class Hud {
     ].join("|");
   }
 
-  private rebuildCard(): void {
-    this.cardKey = this.selectionSignature();
-    this.card.replaceChildren();
-
+  /** Everything the console needs to know about what is selected, in one pass. */
+  private survey(): {
+    counts: Map<number, number>;
+    primary: number;
+    owner: number;
+    mobile: number;
+    builder: number;
+    health: number;
+    maxHealth: number;
+    total: number;
+  } {
     const e = this.world.entities;
-    if (this.selection.selected.size === 0) {
-      this.card.style.display = "none";
-      return;
-    }
-    this.card.style.display = "flex";
-
-    // Header: what is selected.
     const counts = new Map<number, number>();
     let mobile = 0;
     let builder = -1;
+    let owner = this.localPlayer;
+    let health = 0;
+    let maxHealth = 0;
+    let total = 0;
+
     for (const id of this.selection.selected) {
       const i = e.indexOfLive(id);
       if (i < 0) continue;
       counts.set(e.typeId[i], (counts.get(e.typeId[i]) ?? 0) + 1);
       if (e.moveSpeed[i] > 0) mobile++;
       if (builder < 0 && this.world.types.can(e.typeId[i], CAN_BUILD)) builder = i;
+      owner = e.owner[i];
+      health += e.health[i];
+      maxHealth += this.world.types.get(e.typeId[i]).maxHealth;
+      total++;
     }
 
-    const header = document.createElement("div");
-    header.style.cssText = "color:#8fb4d8;font-size:12px;letter-spacing:0.06em";
-    header.textContent = [...counts.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([typeId, n]) => `${n}x ${this.world.types.get(typeId).name}`)
-      .join("   ");
-    this.card.appendChild(header);
+    // The portrait shows whichever type there is most of. With a tie, the lower
+    // type id, so the answer does not flicker as units die.
+    let primary = -1;
+    let best = -1;
+    for (const [typeId, n] of [...counts.entries()].sort((a, b) => a[0] - b[0])) {
+      if (n > best) {
+        best = n;
+        primary = typeId;
+      }
+    }
 
-    const row = document.createElement("div");
-    row.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;justify-content:center";
-    this.card.appendChild(row);
+    return { counts, primary, owner, mobile, builder, health, maxHealth, total };
+  }
+
+  // -------------------------------------------------------------------------
+
+  private rebuildCard(): void {
+    this.cardKey = this.selectionSignature();
+
+    if (this.selection.selected.size === 0) {
+      this.selected.style.display = "none";
+      this.card.style.display = "none";
+      return;
+    }
+    this.selected.style.display = "flex";
+    this.card.style.display = "block";
+
+    const { primary, owner, mobile, builder } = this.survey();
+    const e = this.world.entities;
+
+    // -- middle bay: the portrait ------------------------------------------
+    this.selected.replaceChildren();
+    if (primary >= 0) {
+      const type = this.world.types.get(primary);
+      const bust = document.createElement("div");
+      bust.className = "rts-bust";
+      bust.style.backgroundImage = `url(${portraitFor(type, teamColour(owner))})`;
+      this.selected.appendChild(bust);
+    }
+
+    const body = document.createElement("div");
+    body.className = "body";
+    body.innerHTML =
+      `<div class="name" data-role="name"></div>` +
+      `<div class="rts-meter"><i data-role="health"></i></div>` +
+      `<div class="sub" data-role="sub"></div>` +
+      `<div class="sub" data-role="queue"></div>`;
+    this.selected.appendChild(body);
+
+    // -- right bay: the command card ---------------------------------------
+    const actions: Action[] = [];
 
     // Production, when exactly one factory is selected. Requiring exactly one
-    // avoids the ambiguity of "train a Trooper" against three Foundries.
+    // avoids the ambiguity of "train a Conscript" against three Foundries.
     const bi = this.singleProducer();
     if (bi >= 0) {
+      const building = e.idAt(bi);
       for (const unitType of this.world.types.get(e.typeId[bi]).produces) {
-        const type = this.world.types.get(unitType);
-        const building = e.idAt(bi);
-        row.appendChild(
-          this.button(type, `train`, () =>
-            this.emit({
-              kind: CMD_TRAIN,
-              playerId: this.localPlayer,
-              building,
-              unitType,
-            }),
-          ),
-        );
+        actions.push(this.costed(unitType, () =>
+          this.emit({ kind: CMD_TRAIN, playerId: this.localPlayer, building, unitType }),
+        ));
       }
     }
 
     // Construction, when the selection includes something that can build.
     if (builder >= 0) {
       for (const buildingType of this.world.types.get(e.typeId[builder]).builds) {
-        const type = this.world.types.get(buildingType);
-        row.appendChild(
-          this.button(type, "build", () => this.selection.beginBuild(buildingType), () =>
+        actions.push(
+          this.costed(
+            buildingType,
+            () => this.selection.beginBuild(buildingType),
             this.selection.buildType === buildingType,
           ),
         );
       }
     }
 
+    const orders: Action[] = [];
     if (mobile > 0) {
-      row.appendChild(this.plainButton("Stop (S)", () => this.command(CMD_STOP)));
-      row.appendChild(this.plainButton("Hold (H)", () => this.command(CMD_HOLD)));
-      row.appendChild(
-        this.plainButton(
-          "Attack-move (A)",
-          () => {
-            this.selection.attackMovePending = true;
-            this.rebuildCard();
-          },
-          () => this.selection.attackMovePending,
-        ),
-      );
+      orders.push({
+        label: "Stop",
+        hotkey: "S",
+        affordable: true,
+        active: false,
+        run: () => this.command(CMD_STOP),
+      });
+      orders.push({
+        label: "Hold",
+        hotkey: "H",
+        affordable: true,
+        active: false,
+        run: () => this.command(CMD_HOLD),
+      });
+      orders.push({
+        label: "Attack",
+        hotkey: "A",
+        affordable: true,
+        active: this.selection.attackMovePending,
+        run: () => {
+          this.selection.attackMovePending = true;
+          this.rebuildCard();
+        },
+      });
     }
 
-    const queue = document.createElement("div");
-    queue.dataset.role = "queue";
-    queue.style.cssText = "color:#7fa8cc;font-size:12px;min-height:14px";
-    this.card.appendChild(queue);
-
-    this.refreshQueue();
+    this.card.replaceChildren(this.grid(actions, orders));
+    this.refreshSelected();
   }
 
-  private refreshQueue(): void {
-    // Cheap guard: if the selection shape moved on, rebuild rather than patch.
+  /**
+   * Lay the card out, with the standing orders always on the bottom row.
+   *
+   * Fixed positions are the whole reason a command card is fast to use: Stop is
+   * where Stop always is, and the hand learns it. Letting the orders reflow as
+   * the number of buildable things changes would throw that away for the sake
+   * of a tidier grid.
+   */
+  private grid(actions: Action[], orders: Action[]): HTMLDivElement {
+    const grid = document.createElement("div");
+    grid.className = "rts-grid";
+
+    const usedRows = Math.ceil(actions.length / COLUMNS);
+    const rows = Math.max(MIN_ROWS, usedRows + (orders.length > 0 ? 1 : 0));
+    const cells: Array<Action | null> = new Array<Action | null>(rows * COLUMNS).fill(null);
+
+    actions.forEach((action, i) => (cells[i] = action));
+    orders.forEach((order, i) => (cells[(rows - 1) * COLUMNS + i] = order));
+
+    for (const cell of cells) grid.appendChild(cell ? this.slot(cell) : blank());
+    return grid;
+  }
+
+  private slot(action: Action): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.className =
+      "rts-slot" + (action.affordable ? "" : " poor") + (action.active ? " active" : "");
+    button.title = action.label + (action.cost ? ` — ${action.cost}` : "");
+
+    if (action.type) {
+      button.style.backgroundImage = `url(${iconFor(action.type, teamColour(this.localPlayer))})`;
+    }
+    // Name on every slot, not just the ones without an icon. The silhouettes
+    // are procedural and several buildings read almost identically at 40px, so
+    // until there are modelled assets the label is what makes the card usable.
+    button.innerHTML =
+      (action.hotkey ? `<span class="key">${escapeHtml(action.hotkey)}</span>` : "") +
+      (action.cost ? `<span class="cost">${escapeHtml(action.cost)}</span>` : "") +
+      `<span class="label">${escapeHtml(action.label)}</span>`;
+
+    // Never disabled outright: a dimmed slot that still reports "not enough
+    // alloy" teaches the player why, where a dead one teaches nothing.
+    button.onclick = action.run;
+    return button;
+  }
+
+  /** A slot for a thing that costs resources, with its price and affordability. */
+  private costed(typeId: number, run: () => void, active = false): Action {
+    const type = this.world.types.get(typeId);
+    const parts: string[] = [];
+    if (type.costAlloy > 0) parts.push(`${type.costAlloy}a`);
+    if (type.costPlasma > 0) parts.push(`${type.costPlasma}p`);
+    return {
+      type,
+      label: type.name,
+      cost: parts.join(" "),
+      affordable: this.world.players.canAfford(
+        this.localPlayer,
+        type.costAlloy,
+        type.costPlasma,
+      ),
+      active,
+      run,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+
+  private refreshSelected(): void {
+    // Cheap guard: if the selection's shape moved on, rebuild rather than patch.
     if (this.selectionSignature() !== this.cardKey) {
       this.rebuildCard();
       return;
     }
+    if (this.selection.selected.size === 0) return;
 
-    const slot = this.card.querySelector<HTMLDivElement>('[data-role="queue"]');
-    if (!slot) return;
+    const { counts, primary, health, maxHealth, total } = this.survey();
+    if (primary < 0) return;
 
+    const name = this.selected.querySelector<HTMLDivElement>('[data-role="name"]');
+    const sub = this.selected.querySelector<HTMLDivElement>('[data-role="sub"]');
+    const bar = this.selected.querySelector<HTMLElement>('[data-role="health"]');
+    const queue = this.selected.querySelector<HTMLDivElement>('[data-role="queue"]');
+    if (!name || !sub || !bar || !queue) return;
+
+    const type = this.world.types.get(primary);
+    name.textContent = total > 1 ? `${total} selected` : type.name;
+
+    if (total > 1) {
+      sub.textContent = [...counts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+        .map(([typeId, n]) => `${n}× ${this.world.types.get(typeId).name}`)
+        .join("   ");
+    } else {
+      sub.textContent = `${health} / ${maxHealth}`;
+    }
+
+    const fraction = maxHealth > 0 ? health / maxHealth : 0;
+    bar.style.width = `${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}%`;
+    bar.style.background =
+      fraction > 0.6 ? "var(--good)" : fraction > 0.3 ? "var(--warn)" : "var(--bad)";
+
+    this.refreshQueue(queue);
+  }
+
+  private refreshQueue(slot: HTMLDivElement): void {
     const bi = this.singleProducer();
     const e = this.world.entities;
     if (bi < 0 || e.queueLen[bi] === 0) {
-      slot.textContent = "";
+      slot.replaceChildren();
       return;
     }
 
@@ -273,13 +466,17 @@ export class Hud {
 
     slot.replaceChildren();
     const line = document.createElement("span");
+    line.style.color = "var(--accent-2)";
     line.textContent =
       `${head.name} ${pct}%` + (rest.length > 0 ? `   next: ${rest.join(", ")}` : "");
     slot.appendChild(line);
 
     const cancel = document.createElement("button");
-    cancel.textContent = "cancel";
-    cancel.style.cssText = buttonCss + ";margin-left:10px;padding:1px 8px;font-size:11px";
+    cancel.textContent = "×";
+    cancel.title = "cancel";
+    cancel.style.cssText =
+      "margin-left:8px;border:1px solid var(--line-2);border-radius:3px;background:var(--raised);" +
+      "color:var(--muted);font:inherit;padding:0 6px;cursor:pointer";
     const building = e.idAt(bi);
     cancel.onclick = () =>
       this.emit({ kind: CMD_CANCEL_TRAIN, playerId: this.localPlayer, building, position: -1 });
@@ -289,20 +486,20 @@ export class Hud {
   private refreshOutcome(): void {
     const players = this.world.players;
     if (players.winner === this.localPlayer) {
-      this.show(this.banner, "VICTORY", "#8ef0b0");
+      this.show("THE WORKS ARE YOURS", "var(--accent)");
     } else if (players.winner >= 0) {
-      this.show(this.banner, `PLAYER ${players.winner} WINS`, "#ffd27a");
+      this.show(`PLAYER ${players.winner} HOLDS THE WORKS`, css(teamColour(players.winner)));
     } else if (players.defeated[this.localPlayer] === 1) {
-      this.show(this.banner, "DEFEATED", "#ff9a8a");
+      this.show("STRIPPED", "var(--bad)");
     } else {
       this.banner.style.display = "none";
     }
   }
 
-  private show(element: HTMLDivElement, text: string, colour: string): void {
-    element.textContent = text;
-    element.style.color = colour;
-    element.style.display = "block";
+  private show(text: string, colour: string): void {
+    this.banner.textContent = text;
+    this.banner.style.color = colour;
+    this.banner.style.display = "block";
   }
 
   private command(kind: typeof CMD_STOP | typeof CMD_HOLD): void {
@@ -313,68 +510,17 @@ export class Hud {
     }
     if (entities.length > 0) this.emit({ kind, playerId: this.localPlayer, entities });
   }
-
-  /** A costed button: shows price, and dims when the player cannot pay. */
-  private button(
-    type: EntityType,
-    verb: string,
-    onClick: () => void,
-    active?: () => boolean,
-  ): HTMLButtonElement {
-    const players = this.world.players;
-    const affordable = players.canAfford(this.localPlayer, type.costAlloy, type.costPlasma);
-    const button = document.createElement("button");
-    button.style.cssText =
-      buttonCss +
-      (active?.() ? ";border-color:#7dffb0;background:#1c3a2c" : "") +
-      (affordable ? "" : ";opacity:0.45");
-    button.title = `${verb} ${type.name}`;
-
-    const cost: string[] = [];
-    if (type.costAlloy > 0) cost.push(`${type.costAlloy}a`);
-    if (type.costPlasma > 0) cost.push(`${type.costPlasma}p`);
-    if (type.supplyCost > 0) cost.push(`${type.supplyCost}s`);
-
-    button.innerHTML =
-      `<div style="font-size:12px">${type.name}</div>` +
-      `<div style="font-size:10px;color:#7fa8cc">${cost.join("  ")}</div>`;
-    // Never disabled outright: a dimmed button that still reports "not enough
-    // alloy" teaches the player why, where a dead button teaches nothing.
-    button.onclick = onClick;
-    return button;
-  }
-
-  private plainButton(
-    label: string,
-    onClick: () => void,
-    active?: () => boolean,
-  ): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.style.cssText =
-      buttonCss + ";font-size:12px" + (active?.() ? ";border-color:#7dffb0;background:#1c3a2c" : "");
-    button.textContent = label;
-    button.onclick = onClick;
-    return button;
-  }
 }
 
-const buttonCss =
-  "border:1px solid #2f6f8f;border-radius:5px;background:#14283a;color:#cfe4ff;" +
-  "font:inherit;padding:5px 10px;cursor:pointer;line-height:1.35;text-align:center";
-
-function panel(extra: string): HTMLDivElement {
-  const element = document.createElement("div");
-  element.style.cssText =
-    "border:1px solid #234;border-radius:6px;background:rgba(8,12,20,0.78);color:#cfe4ff;" +
-    "backdrop-filter:blur(4px);font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" +
-    extra;
-  document.body.appendChild(element);
-  return element;
+function blank(): HTMLDivElement {
+  const cell = document.createElement("div");
+  cell.className = "rts-slot blank";
+  return cell;
 }
 
 function stat(label: string, value: string | number, colour: string): string {
   return (
-    `<span><span style="color:#62809f;font-size:11px">${label}</span> ` +
-    `<span style="color:${colour}">${value}</span></span>`
+    `<span><span class="tag">${label}</span> ` +
+    `<b style="color:${colour}">${value}</b></span>`
   );
 }

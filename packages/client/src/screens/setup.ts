@@ -161,7 +161,7 @@ export class SetupScreen {
         `</select>` +
         `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;` +
         `color:${you ? "var(--accent)" : "var(--muted)"}">${escapeHtml(this.slotLabel(player))}</span>` +
-        `<select data-race="${player}" style="width:190px" ${this.raceDisabled(player)}>` +
+        `<select data-race="${player}" style="width:214px" ${this.raceDisabled(player)}>` +
         RACE_IDS.map((id) => {
           const race = defaultContent.race(id);
           return (

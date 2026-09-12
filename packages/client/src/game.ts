@@ -166,7 +166,8 @@ export function startGame(options: GameOptions): RunningGame {
     session.submitLocal(command),
   );
   const groups = new ControlGroups(world, selection, rig, localPlayer);
-  const minimap = new Minimap(world, rig, localPlayer);
+  // Built after the HUD, because the console owns the bay it mounts into.
+  const minimap = new Minimap(world, rig, localPlayer, hud.minimapBay);
 
   // Translucent footprint preview shown while placing a building.
   const ghost = new THREE.Mesh(

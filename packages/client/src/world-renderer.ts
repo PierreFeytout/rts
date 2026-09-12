@@ -11,6 +11,7 @@ import {
 import * as THREE from "three";
 import { bamToThreeY, simToWorld } from "./coords.js";
 import { MODEL_COUNT, buildModels, modelFor, scalesWithFootprint } from "./models.js";
+import { NEUTRAL_COLOUR, VENT_COLOUR, teamColour } from "./palette.js";
 
 /**
  * Instanced rendering of simulation entities, with tick interpolation.
@@ -31,11 +32,9 @@ import { MODEL_COUNT, buildModels, modelFor, scalesWithFootprint } from "./model
  * factions is still eight draw calls, and adding a race adds none.
  */
 
-/** Team colours, indexed by owner id. */
-const TEAM_COLOURS = [0x63d0ff, 0xff7a59, 0x9d7aff, 0x6ee7a8];
+
 /** Unowned scenery: ore patches and geothermal vents. */
-const NEUTRAL_COLOUR = 0xd8c37a;
-const VENT_COLOUR = 0x7fd8b0;
+
 
 /** Health bar geometry, in world units. */
 const BAR_WIDTH = 1.1;
@@ -303,9 +302,7 @@ function commit(mesh: THREE.InstancedMesh, count: number): void {
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 }
 
-function teamColour(owner: number): number {
-  return owner < 0 ? NEUTRAL_COLOUR : TEAM_COLOURS[owner % TEAM_COLOURS.length];
-}
+
 
 /** Green through amber to red as health drains. */
 function healthColour(fraction: number): number {

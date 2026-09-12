@@ -70,7 +70,7 @@ async function runMatch(launch: Launch): Promise<void> {
   } else if (game.saveReplay) {
     // Host only: a guest never sees the authoritative command log.
     cleanup.push(
-      cornerButton("save replay", 52, () => downloadReplay(game.saveReplay!()), "saved"),
+      cornerButton("save replay", 34, () => downloadReplay(game.saveReplay!()), "saved"),
     );
   }
 
@@ -105,7 +105,7 @@ async function runMatch(launch: Launch): Promise<void> {
   exposeDevHandle(game, launch);
 
   await new Promise<void>((resolve) => {
-    cleanup.push(cornerButton("leave match", 12, () => resolve()));
+    cleanup.push(cornerButton("leave match", 10, () => resolve()));
   });
 
   for (const undo of cleanup) undo();
@@ -114,25 +114,28 @@ async function runMatch(launch: Launch): Promise<void> {
 }
 
 /**
- * A button in the bottom-right corner of the match screen.
+ * A button in the **top-right** corner of the match screen.
  *
- * Stacked by offset rather than laid out, because there are two of them and a
- * container would be more code than the thing it contained. Returns its own
- * remover, so the match teardown is a list of undos rather than a list of
- * queries.
+ * It was the bottom-right corner until the console moved in there and put the
+ * command card underneath both of these. Stacked by offset rather than laid
+ * out, because there are two of them and a container would be more code than
+ * the thing it contained. Returns its own remover, so the match teardown is a
+ * list of undos rather than a list of queries.
+ *
+ * `top` is measured from below the resource readout, which owns that corner.
  */
 function cornerButton(
   label: string,
-  bottom: number,
+  top: number,
   onClick: () => void,
   confirmation?: string,
 ): () => void {
   const button = document.createElement("button");
   button.textContent = label;
   button.style.cssText =
-    `position:fixed;bottom:${bottom}px;right:12px;z-index:13;padding:6px 12px;` +
-    "border:1px solid var(--edge);border-radius:5px;background:var(--raised);" +
-    "color:var(--text);font:12px/1.5 var(--mono);cursor:pointer";
+    `position:fixed;top:${top + 38}px;right:12px;z-index:13;padding:4px 10px;` +
+    "border:1px solid var(--line-2);border-radius:4px;background:rgba(16,12,9,0.8);" +
+    "color:var(--muted);font:11px/1.5 var(--mono);cursor:pointer";
   button.onclick = () => {
     onClick();
     // Saving reports back in place, because nothing else visibly happens.

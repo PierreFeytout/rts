@@ -7,6 +7,11 @@ import {
   type World,
 } from "@rts/sim";
 import type { IsoCamera } from "./iso-camera.js";
+import {
+  NEUTRAL_COLOUR as PALETTE_NEUTRAL,
+  TEAM_COLOURS as PALETTE_TEAMS,
+  css,
+} from "./palette.js";
 
 /**
  * Minimap: terrain, fog, units, and where the camera is pointing.
@@ -27,9 +32,9 @@ const SIZE = 190;
 /** How often the unit and fog layers are redrawn, in milliseconds. */
 const REDRAW_MS = 66;
 
-const TEAM_COLOURS = ["#63d0ff", "#ff7a59", "#9d7aff", "#6ee7a8"];
-const NEUTRAL_COLOUR = "#a08a4e";
-/** Open rockcrete, and the spoil heaps standing on it. See UNIVERSE.md. */
+const TEAM_COLOURS = PALETTE_TEAMS.map(css);
+const NEUTRAL_COLOUR = css(PALETTE_NEUTRAL);
+/** Open ashfield, and the spoil heaps standing on it. See UNIVERSE.md. */
 const GROUND_COLOUR = "#241a12";
 const SPOIL_COLOUR = "#0f0c09";
 
@@ -59,7 +64,7 @@ export class Minimap {
   private dragging = false;
   private readonly disposers: Array<() => void> = [];
 
-  constructor(world: World, rig: IsoCamera, localPlayer: number) {
+  constructor(world: World, rig: IsoCamera, localPlayer: number, parent: HTMLElement) {
     this.world = world;
     this.rig = rig;
     this.localPlayer = localPlayer;
@@ -69,11 +74,14 @@ export class Minimap {
     this.canvas = document.createElement("canvas");
     this.canvas.width = SIZE;
     this.canvas.height = SIZE;
+    // Mounted into the console's left bay rather than positioned itself. The
+    // console owns the layout; a minimap that placed itself would have to know
+    // how wide the command card happened to be.
     this.canvas.style.cssText =
-      `position:fixed;left:12px;bottom:12px;z-index:12;width:${SIZE}px;height:${SIZE}px;` +
-      "border:1px solid #234;border-radius:6px;background:#070a10;cursor:crosshair;" +
+      `display:block;width:${SIZE}px;height:${SIZE}px;` +
+      "border:1px solid var(--line-2);border-radius:3px;background:#0d0a07;cursor:crosshair;" +
       "image-rendering:pixelated";
-    document.body.appendChild(this.canvas);
+    parent.appendChild(this.canvas);
     this.ctx = this.canvas.getContext("2d")!;
 
     this.terrain = document.createElement("canvas");
