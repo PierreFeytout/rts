@@ -139,8 +139,8 @@ function generate({ id, name, blurb, size, seed, inset, blockCount, blockMin, bl
 const MAPS = [
   generate({
     id: "rift-basin",
-    name: "Rift Basin",
-    blurb: "Four corners around a broken middle. The standard four-player map.",
+    name: "Cinder Reach",
+    blurb: "Four holdings around a burnt-out middle. The standard four-player map.",
     size: 256,
     seed: 0x5eed1,
     inset: 24,
@@ -151,8 +151,8 @@ const MAPS = [
   }),
   generate({
     id: "sprawl",
-    name: "Sprawl",
-    blurb: "A very long walk between bases. Scouting matters; so does not overextending.",
+    name: "The Long Sprawl",
+    blurb: "Hours of spoil between one holding and the next. Scout, and do not overextend.",
     size: 1024,
     seed: 0x5eed2,
     inset: 64,

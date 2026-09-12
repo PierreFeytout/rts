@@ -7,6 +7,7 @@ import {
   type Command,
 } from "@rts/sim";
 import { startGame, type RunningGame } from "./game.js";
+import { loadTerrain } from "./materials.js";
 import { createEmptyWorld } from "./match.js";
 import { Reconnector } from "./reconnect.js";
 import { ReplayControls, downloadReplay } from "./replay-ui.js";
@@ -25,6 +26,11 @@ import { installStyles } from "./ui.js";
 enableDevChecks(import.meta.env.DEV);
 installStyles();
 
+// Decoded once, before the menu is even shown. Six PNGs take long enough to be
+// a visible hitch, and the moment it would otherwise land is exactly when the
+// player has just pressed Start.
+const terrain = await loadTerrain();
+
 for (;;) {
   const launch = await chooseMatch();
   await runMatch(launch);
@@ -40,6 +46,7 @@ async function runMatch(launch: Launch): Promise<void> {
     isHost: launch.isHost,
     mapTiles: launch.world.mapTiles,
     ai: launch.ai,
+    terrain,
   });
 
   const cleanup: Array<() => void> = [];

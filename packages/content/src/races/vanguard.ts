@@ -17,15 +17,15 @@
  */
 export const vanguard = {
   id: "vanguard",
-  name: "Vanguard Directive",
-  blurb: "Corporate-military. Kinetic lines, explosive armour.",
+  name: "The Ashen Directorate",
+  blurb: "The combine that owns the paperwork. Conscripts, contracts, and kinetic lines.",
   startBuilding: "vanguard.nexus",
   startUnit: "vanguard.drone",
 
   units: [
     {
       id: "vanguard.drone",
-      name: "Drone",
+      name: "Servitor",
       maxHealth: 60,
       armour: "light",
       radius: 0.32,
@@ -50,7 +50,7 @@ export const vanguard = {
     },
     {
       id: "vanguard.trooper",
-      name: "Trooper",
+      name: "Conscript",
       maxHealth: 90,
       armour: "light",
       radius: 0.32,
@@ -64,7 +64,7 @@ export const vanguard = {
     },
     {
       id: "vanguard.scout",
-      name: "Scout",
+      name: "Outrider",
       maxHealth: 70,
       armour: "light",
       radius: 0.28,
@@ -79,7 +79,7 @@ export const vanguard = {
     },
     {
       id: "vanguard.hovertank",
-      name: "Hovertank",
+      name: "Breaker",
       maxHealth: 260,
       armour: "heavy",
       radius: 0.45,
@@ -97,7 +97,7 @@ export const vanguard = {
   buildings: [
     {
       id: "vanguard.nexus",
-      name: "Command Nexus",
+      name: "Bastion",
       maxHealth: 1500,
       armour: "structure",
       radius: 2,
@@ -110,7 +110,7 @@ export const vanguard = {
     },
     {
       id: "vanguard.extractor",
-      name: "Extractor",
+      name: "Vent Tap",
       maxHealth: 500,
       armour: "structure",
       radius: 1,
@@ -134,7 +134,7 @@ export const vanguard = {
     },
     {
       id: "vanguard.pylon",
-      name: "Supply Pylon",
+      name: "Habstack",
       maxHealth: 400,
       armour: "structure",
       radius: 1,
@@ -145,7 +145,7 @@ export const vanguard = {
     },
     {
       id: "vanguard.turret",
-      name: "Turret",
+      name: "Gun Nest",
       maxHealth: 550,
       armour: "structure",
       radius: 1,

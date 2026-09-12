@@ -21,15 +21,15 @@
  */
 export const concord = {
   id: "concord",
-  name: "Verdant Concord",
-  blurb: "Grown, not built. Brawlers up front, spores behind.",
+  name: "The Verdigris",
+  blurb: "Corrosion that organised. It does not build; it grows through.",
   startBuilding: "concord.heartwood",
   startUnit: "concord.sporeling",
 
   units: [
     {
       id: "concord.sporeling",
-      name: "Sporeling",
+      name: "Creeper",
       maxHealth: 70,
       armour: "light",
       radius: 0.32,
@@ -53,7 +53,7 @@ export const concord = {
     },
     {
       id: "concord.thornling",
-      name: "Thornling",
+      name: "Flenser",
       maxHealth: 130,
       armour: "light",
       radius: 0.34,
@@ -69,7 +69,7 @@ export const concord = {
     },
     {
       id: "concord.sporecaster",
-      name: "Sporecaster",
+      name: "Blightcaster",
       maxHealth: 80,
       armour: "light",
       radius: 0.3,
@@ -103,7 +103,7 @@ export const concord = {
   buildings: [
     {
       id: "concord.heartwood",
-      name: "Heartwood",
+      name: "Heartrot",
       maxHealth: 1600,
       armour: "structure",
       radius: 2,
@@ -128,7 +128,7 @@ export const concord = {
     },
     {
       id: "concord.grove",
-      name: "Grove",
+      name: "Canker",
       maxHealth: 950,
       armour: "structure",
       radius: 1.5,

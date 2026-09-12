@@ -1,8 +1,8 @@
 {
   "format": 1,
   "id": "rift-basin",
-  "name": "Rift Basin",
-  "blurb": "Four corners around a broken middle. The standard four-player map.",
+  "name": "Cinder Reach",
+  "blurb": "Four holdings around a burnt-out middle. The standard four-player map.",
   "size": 256,
   "starts": [
     {"x":24,"y":24},

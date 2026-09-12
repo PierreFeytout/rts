@@ -9,6 +9,7 @@ import { Effects } from "./effects.js";
 import { FogRenderer } from "./fog-renderer.js";
 import { Hud } from "./hud.js";
 import { CAMERA_DISTANCE, IsoCamera } from "./iso-camera.js";
+import { groundGeometry, type TerrainMaterials } from "./materials.js";
 import { Minimap } from "./minimap.js";
 import { Selection } from "./selection.js";
 import { TerrainRenderer } from "./terrain-renderer.js";
@@ -54,6 +55,8 @@ export interface GameOptions {
    * all peers execute identical orders. See ai/driver.ts.
    */
   ai?: Map<number, AiDriver>;
+  /** Loaded once at startup; see materials.ts. */
+  terrain: TerrainMaterials;
   /** Rendered in the HUD so a player can read their code back out mid-game. */
   joinCode?: string;
   onStatus?: (status: GameStatus) => void;
@@ -104,11 +107,16 @@ export function startGame(options: GameOptions): RunningGame {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b0f16);
+  // The Ashworks: a low orange lid of a sky over ash that never settles. There
+  // is no pure black anywhere in this palette -- airborne particulate scatters
+  // the furnace light into every shadow. See UNIVERSE.md.
+  scene.background = new THREE.Color(0x0a0806);
   // Fog distance is measured from the camera, which sits CAMERA_DISTANCE back
   // to frame the orthographic view. Ranges must straddle that, not start near
   // zero, or the whole scene renders as flat fog colour.
-  scene.fog = new THREE.Fog(0x121a26, CAMERA_DISTANCE - 30, CAMERA_DISTANCE + 190);
+  // Heavy and warm. You should not be able to see the far side of a large map,
+  // and the reason should read as ash in the air rather than as a draw distance.
+  scene.fog = new THREE.Fog(0x1a1209, CAMERA_DISTANCE - 20, CAMERA_DISTANCE + 150);
 
   const rig = new IsoCamera({
     viewHeight: 44,
@@ -117,27 +125,37 @@ export function startGame(options: GameOptions): RunningGame {
 
   const controls = new CameraControls(rig, canvas);
 
-  scene.add(new THREE.AmbientLight(0x4a5a78, 1.4));
-  const key = new THREE.DirectionalLight(0xcfe4ff, 2.2);
-  key.position.set(-40, 70, -30);
+  // Ambient is the ash-scattered sky: weak, and tinted toward the ground it is
+  // bouncing off rather than neutral grey.
+  scene.add(new THREE.AmbientLight(0x3a2c22, 1.1));
+
+  // The key is a furnace below the horizon, not a sun. Low angle, warm, and the
+  // brightest thing in the world by a wide margin.
+  const key = new THREE.DirectionalLight(0xe8a04a, 2.4);
+  key.position.set(-60, 34, -26);
   scene.add(key);
-  const fill = new THREE.DirectionalLight(0xff9a5c, 0.5);
-  fill.position.set(50, 25, 40);
-  scene.add(fill);
+
+  // One weak cold rim from overhead, and the only blue permitted anywhere. It
+  // exists to separate a silhouette from the ground it is standing on; without
+  // it every unit disappears into the floor, because both are the same warm
+  // dark brown.
+  const rim = new THREE.DirectionalLight(0x4a6a8a, 0.95);
+  rim.position.set(40, 80, 55);
+  scene.add(rim);
 
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(mapTiles, mapTiles),
-    new THREE.MeshStandardMaterial({ color: 0x1b2433, roughness: 0.95 }),
+    groundGeometry(mapTiles, (tx, ty) => world.grid.inBounds(tx, ty) && world.grid.isBlocked(tx, ty)),
+    options.terrain.groundMaterial(mapTiles),
   );
-  ground.rotation.x = -Math.PI / 2;
   ground.position.set(mapTiles / 2, 0, mapTiles / 2);
+  ground.receiveShadow = false;
   scene.add(ground);
 
-  const grid = new THREE.GridHelper(mapTiles, mapTiles, 0x24506b, 0x1a2534);
-  grid.position.set(mapTiles / 2, 0.01, mapTiles / 2);
-  scene.add(grid);
+  // The per-tile GridHelper is gone. It was an M0 debugging aid, and a bright
+  // blue lattice over every surface is the single most out-of-place thing that
+  // could be drawn in this palette. Build placement has its own ghost.
 
-  const terrain = new TerrainRenderer(scene);
+  const terrain = new TerrainRenderer(scene, options.terrain);
   const units = new WorldRenderer(scene, rig.camera);
   const effects = new Effects(scene);
   const fog = new FogRenderer(scene, mapTiles, localPlayer);
@@ -398,12 +416,26 @@ export function startGame(options: GameOptions): RunningGame {
       // leaks every geometry, material and texture of the previous match into
       // the next one -- and on the third or fourth match that is visible as a
       // browser tab using a gigabyte.
+      //
+      // The terrain materials are the exception, and the reason this needs a
+      // guard at all: they own the generated textures, they are loaded once for
+      // the life of the process, and disposing them here would leave the next
+      // match rendering its ground with a destroyed texture.
+      const shared = new Set<THREE.Material>([
+        options.terrain.slag,
+        options.terrain.groundMaterial(mapTiles),
+      ]);
       scene.traverse((object) => {
         const mesh = object as Partial<THREE.Mesh>;
-        mesh.geometry?.dispose();
         const material = mesh.material;
-        if (Array.isArray(material)) for (const m of material) m.dispose();
-        else material?.dispose();
+        if (Array.isArray(material)) {
+          for (const m of material) if (!shared.has(m)) m.dispose();
+        } else if (material && !shared.has(material)) {
+          material.dispose();
+        }
+        // The ground's geometry is per-map and per-match; only its material is
+        // shared. Disposing it is correct.
+        mesh.geometry?.dispose();
       });
       scene.clear();
       renderer.dispose();

@@ -29,6 +29,9 @@ const REDRAW_MS = 66;
 
 const TEAM_COLOURS = ["#63d0ff", "#ff7a59", "#9d7aff", "#6ee7a8"];
 const NEUTRAL_COLOUR = "#a08a4e";
+/** Open rockcrete, and the spoil heaps standing on it. See UNIVERSE.md. */
+const GROUND_COLOUR = "#241a12";
+const SPOIL_COLOUR = "#0f0c09";
 
 export class Minimap {
   private readonly canvas: HTMLCanvasElement;
@@ -126,7 +129,7 @@ export class Minimap {
     // which on a normal map is a handful of rects rather than sixteen thousand.
     const vision = this.world.vision;
     if (vision.enabled) {
-      ctx.fillStyle = "#070a10";
+      ctx.fillStyle = "#060504";
       const n = this.world.mapTiles;
       const step = this.fogStep;
       for (let ty = 0; ty < n; ty += step) {
@@ -214,10 +217,10 @@ export class Minimap {
 
     const ctx = this.terrainCtx;
     const s = this.scale;
-    ctx.fillStyle = "#151d2a";
+    ctx.fillStyle = GROUND_COLOUR;
     ctx.fillRect(0, 0, SIZE, SIZE);
 
-    ctx.fillStyle = "#2c3a4f";
+    ctx.fillStyle = SPOIL_COLOUR;
     const grid = this.world.grid;
     for (let ty = 0; ty < grid.height; ty++) {
       for (let tx = 0; tx < grid.width; tx++) {

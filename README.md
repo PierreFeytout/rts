@@ -4,7 +4,13 @@ A futuristic real-time strategy game. 2.5D isometric, peer-hosted multiplayer �
 everyone runs the same executable, and the player who creates the game hosts it.
 There is no server to deploy and no third party involved.
 
-**Status: M9 complete — it has a front end.** A menu, a skirmish against the
+**Status: M10 — the world has a look.** The Ashworks: a forge-world buried under
+its own slag, lit by furnaces nobody turned off. Terrain textures are generated
+by a committed script rather than painted; the setting and the art direction
+that follows from it are in [UNIVERSE.md](UNIVERSE.md), which is the
+specification the assets answer to.
+
+**M9 complete — it has a front end.** A menu, a skirmish against the
 computer, and a real multiplayer lobby: friends join, everyone picks a race, and
 the host starts when the room is ready. Your machine opens the port and runs the
 match; closing the window ends it.
@@ -108,6 +114,36 @@ gather or rally depending on what is under the cursor. That is the genre
 convention, and it is what keeps the command card optional rather than
 mandatory.
 
+## Assets
+
+Textures are **generated, not painted**. `scripts/generate-terrain.mjs` writes
+seamlessly-tiling PNG sets into `packages/client/assets/terrain/`, the same way
+`scripts/generate-map.mjs` writes the maps, and the generator is committed
+alongside its output:
+
+```bash
+node scripts/generate-terrain.mjs
+```
+
+The PNG encoder is `scripts/lib/png.mjs`, about a hundred lines over
+`node:zlib`. A dependency would have been the obvious alternative, and this is a
+project that hand-wrote NAT-PMP and UPnP rather than take one with a CVE in it.
+
+Two things are worth knowing before editing a surface:
+
+- **Every surface is a height field first.** Colour, normals and occlusion are
+  all derived from it. Author an albedo and a normal map separately and you get
+  a surface where the lighting and the staining describe different rock.
+- **Nothing that tiles may contain a straight line.** The ground was poured
+  rockcrete slabs at first. A texture repeating a hundred times across a map
+  cannot contain a regular grid — the joints line up into a lattice stretching
+  to the horizon, and no amount of macro variation hides it.
+
+None of it reaches the simulation. Materials, textures and lighting are
+presentation, like fog memory and the minimap: the cost grid still knows only
+`walkable`, `blocked` and `structure`, and the state hash cannot tell the
+difference.
+
 ## Layout
 
 | Package | Role |
@@ -118,7 +154,7 @@ mandatory.
 | `packages/protocol` | Wire messages and MessagePack codec |
 | `packages/netcode` | Host arbiter, guest session, replay. No DOM, no Node. |
 | `packages/desktop` | The Electron shell: the window, and the listening socket |
-| `packages/client` | Vite + Three.js renderer, menus, lobby, input |
+| `packages/client` | Vite + Three.js renderer, menus, lobby, input, terrain assets |
 
 Inside `packages/sim`: `fixed` (Q16.16 math), `rng`, `clock` (tick pacing),
 `hash` (state hashing), `entities` (SoA store), `grid` (passability),
@@ -950,7 +986,11 @@ tooling captures nothing there, while a WebGL readback still works.
 - **M7** — Ship: deployment, reconnect, replay playback ✅
 - **M8** — Desktop: direct connections, Electron shell, automatic port forwarding ✅
 - **M9** — Front end: menu, skirmish, multiplayer lobby, authored maps ✅
+- **M10** — The Ashworks: setting, palette, generated terrain assets 🚧 *(terrain done; UI, units and buildings next)*
 
-Next, in no committed order: a computer player that actually plays (the seam is
-`packages/client/src/ai/driver.ts`), a map editor, host migration, and authored
-`.glb` models in place of the procedural silhouettes.
+Next: the rest of M10 — UI, then units and buildings, which still render as
+teal-and-blue procedural silhouettes from before the art direction existed and
+clash with everything around them.
+
+After that, in no committed order: a computer player that actually plays (the
+seam is `packages/client/src/ai/driver.ts`), a map editor, and host migration.

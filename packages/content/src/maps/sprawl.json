@@ -1,8 +1,8 @@
 {
   "format": 1,
   "id": "sprawl",
-  "name": "Sprawl",
-  "blurb": "A very long walk between bases. Scouting matters; so does not overextending.",
+  "name": "The Long Sprawl",
+  "blurb": "Hours of spoil between one holding and the next. Scout, and do not overextend.",
   "size": 1024,
   "starts": [
     {"x":64,"y":64},

@@ -83,8 +83,10 @@ export class FogRenderer {
       new THREE.MeshBasicMaterial({
         map: this.texture,
         // Unlit ground. Given as a hex, so three.js applies the sRGB
-        // conversion that a raw texture byte would not get.
-        color: 0x05080e,
+        // conversion that a raw texture byte would not get. Warm-black rather
+        // than blue-black: ash scatters the furnace light into everything, and
+        // a cold shadow in this palette reads as a hole in the world.
+        color: 0x0a0806,
         transparent: true,
         depthWrite: false,
         // Scene fog would blend this back toward the horizon tone, which is
