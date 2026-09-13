@@ -59,6 +59,25 @@ dropped onto cleared ground and bolted to whatever was underneath.
 **Kinetic lines and explosive armour.** Iron, rust-bleed, hazard stripes worn
 down to ghosts, stencilled serial numbers. Warm greys against the ash.
 
+#### The Conscript
+
+They were foundry hands, welders, slag-sorters. When the Directorate bought the
+decommissioning contract it bought the workforce with it, and a contracted
+labourer costs less than a soldier. They were given a weapon and a number, in
+that order.
+
+A Conscript wears what they wore at the foundry, reinforced: **a welder's visor
+for a helmet, a ceramic heat apron** that stops shrapnel as well as sparks, and
+an **ash filter** over the mouth. The weapon is a site tool — a **rivet driver**,
+re-bored to fire white-hot bolts. The contract number is stencilled on the back,
+where the officer reads it.
+
+They fight in **squads of three**, and a squad thins as it takes losses. On the
+field: bone-coloured helmets and aprons, the visor and shoulder plates in the
+owner's paint, the visor lens and the driver's heating coils glowing ember. The
+gun is long and held level, far out in front, because range is everything this
+unit has.
+
 ### The Verdigris
 
 Something is growing back, and it is not plants.

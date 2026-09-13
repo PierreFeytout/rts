@@ -102,7 +102,7 @@ def directorate_palette():
         "paint": material("paint", (0.45, 0.45, 0.45), roughness=0.62, metallic=0.08),
         # Bone-coloured heat shielding. The only near-neutral in the palette, and
         # used in quantity only where ceramic is what the thing is made of.
-        "ceramic": material("ceramic", (0.42, 0.36, 0.28), roughness=0.78, metallic=0.0),
+        "ceramic": material("ceramic", (0.62, 0.55, 0.42), roughness=0.78, metallic=0.0),
         "lamp": material(
             "lamp", (0.9, 0.52, 0.16), roughness=0.4, metallic=0.0,
             # Strength 2.5, not more. At 6 the lamp saturated to white in the game,
@@ -263,13 +263,16 @@ def save_blend(content_id):
     return path
 
 
-def previews(col, out_dir, name, views=((35, 30), (35, 210), (60, 120))):
+def previews(col, out_dir, name, views=((35, 30), (35, 210), (60, 120)), poses=()):
     """Render the model from a few angles, lit like the game.
 
     Not for the player -- for checking the model without opening Blender. The
     light is the game's: a low warm key and a cold rim, on a dark warm ground,
     because a model judged under a bright neutral studio light will not look
     the same in the Ashworks.
+
+    `poses` is a list of `(label, setup)` for a rigged model: each `setup()`
+    poses it, and it is rendered again from the first view.
     """
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_EEVEE"
@@ -322,6 +325,18 @@ def previews(col, out_dir, name, views=((35, 30), (35, 210), (60, 120))):
         cam_obj.location = centre + offset
         cam_obj.rotation_euler = (centre - cam_obj.location).to_track_quat("-Z", "Y").to_euler()
         path = os.path.join(out_dir, f"{name}_{elevation}_{azimuth}.png")
+        scene.render.filepath = path
+        bpy.ops.render.render(write_still=True)
+        written.append(path)
+
+    elevation, azimuth = views[0]
+    el, az = math.radians(elevation), math.radians(azimuth)
+    offset = Vector((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el))) * 5
+    cam_obj.location = centre + offset
+    cam_obj.rotation_euler = (centre - cam_obj.location).to_track_quat("-Z", "Y").to_euler()
+    for label, setup in poses:
+        setup()
+        path = os.path.join(out_dir, f"{name}_{label}.png")
         scene.render.filepath = path
         bpy.ops.render.render(write_still=True)
         written.append(path)
