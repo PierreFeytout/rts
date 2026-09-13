@@ -311,6 +311,9 @@ their colour while the building is selected.
   vent, clamps slam shut, the stack telescopes up, a valve vents. `idle` -- it
   works all the time: a pump beam nods, the pressure wheel turns, the grille
   glow pulses. No `produce` or `release`.
+  **Modelled** -- `scripts/models/vent_tap.py`. The vent is consumed when the
+  Tap is placed, so the model carries it: slag heaped round the bore, the
+  fire's light leaking between the chunks.
 
 #### Foundry -- `vanguard.foundry`
 

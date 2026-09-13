@@ -568,9 +568,10 @@ def clip(rig, name, frames, keys):
     for pb in rig.pose.bones:
         pb.rotation_mode = "QUATERNION"
 
+    previous = {}
     for frame in sorted(keys):
         for bone in bones:
-            key_pose(rig, bone, frame, keys[frame].get(bone, []))
+            previous[bone] = key_pose(rig, bone, frame, keys[frame].get(bone, []), previous.get(bone))
 
     return _finish_clip(rig, action, name, frames)
 
@@ -604,8 +605,9 @@ def track_clip(rig, name, frames, tracks, linear=()):
         first = track[frames_here[0]] if frames_here else []
         last = track[frames_here[-1]] if frames_here else []
         schedule = {0: first, frames: last, **track}
+        previous = None
         for frame in sorted(schedule):
-            key_pose(rig, pb.name, frame, schedule[frame])
+            previous = key_pose(rig, pb.name, frame, schedule[frame], previous)
 
     if linear:
         for fcurve in _fcurves(action):
@@ -629,9 +631,17 @@ def _fcurves(action):
     return curves
 
 
-def key_pose(rig, bone, frame, entries):
+def key_pose(rig, bone, frame, entries, previous=None):
     """Key one bone's rotation, location and scale at `frame`, at rest unless
-    `entries` says otherwise."""
+    `entries` says otherwise. Returns the rotation keyed, to pass back as
+    `previous` for the bone's next key.
+
+    Blender interpolates a quaternion component by component, and a rotation
+    has two quaternions, q and -q. Converting from a matrix always picks one
+    of them, so a spin keyed at 180 then 270 degrees flips sign between the two
+    keys and swings back a quarter turn in between. Each key is kept on the
+    same side as the one before it, so a spin keyed in quarter turns spins.
+    """
     q = Matrix.Identity(3).to_quaternion()
     location = Vector((0.0, 0.0, 0.0))
     scale = Vector((1.0, 1.0, 1.0))
@@ -646,6 +656,8 @@ def key_pose(rig, bone, frame, entries):
             scale = Vector((1.0, value, 1.0))
         else:
             q = pose_rotation(rig, bone, kind, value) @ q
+    if previous is not None and q.dot(previous) < 0:
+        q.negate()
     pb = rig.pose.bones[bone]
     pb.rotation_quaternion = q
     pb.location = location
@@ -653,6 +665,7 @@ def key_pose(rig, bone, frame, entries):
     pb.keyframe_insert("rotation_quaternion", frame=frame)
     pb.keyframe_insert("location", frame=frame)
     pb.keyframe_insert("scale", frame=frame)
+    return q
 
 
 def _finish_clip(rig, action, name, frames):

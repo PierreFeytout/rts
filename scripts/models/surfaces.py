@@ -390,6 +390,25 @@ def hazard(name="hazard", **world):
     return g.finish(c, g.mixf(wear, 0.6, 0.85), height, strength=0.3, distance=0.001)
 
 
+def slag(name="slag", colour=(0.035, 0.03, 0.027), **world):
+    """Vitrified furnace waste (UNIVERSE.md): black clinker froth, glassy where it
+    cooled fast, rust bled out of its iron, and cracked by the heat still under
+    it. Dumped, not eroded."""
+    g = Graph(name, **world)
+    froth = g.noise(120, detail=6, distortion=0.6)
+    glass = g.band(g.noise(40, detail=3), 0.55, 0.7)
+    rust = g.band(g.noise(18, detail=5, distortion=0.5), 0.55, 0.8)
+    cracks = g.cracks(20, 0.025)
+    grime = g.math("SUBTRACT", 1.0, g.occlusion(0.01))
+
+    c = g.mix(g.band(froth, 0.3, 0.7), colour, [v * 2.4 for v in colour])
+    c = g.mix(g.math("MULTIPLY", rust, 0.8), c, (0.15, 0.055, 0.022))
+    c = g.mix(cracks, c, (0.012, 0.01, 0.008))
+    c = g.mix(g.math("MULTIPLY", grime, 0.5), c, (0.01, 0.008, 0.006))
+    height = g.math("SUBTRACT", froth, g.math("MULTIPLY", cracks, 0.8))
+    return g.finish(c, g.mixf(glass, 0.85, 0.25), height, strength=0.6, distance=0.002)
+
+
 def structure_surfaces(scale, ash=1.0):
     """Everything a Directorate building is made of, sized for `scale`."""
     world = {"scale": scale, "ash": ash}
@@ -399,6 +418,7 @@ def structure_surfaces(scale, ash=1.0):
         "rockcrete": rockcrete(**world),
         "grate": grate(**world),
         "hazard": hazard(**world),
+        "slag": slag(**world),
     }
 
 
