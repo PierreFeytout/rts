@@ -35,6 +35,29 @@ Content ids are the internal names and never change, which is why files are name
 after them. Display names do change — the Drone is called the Servitor now — and
 a model named after one would silently stop matching.
 
+## Exporting from Blender
+
+*File → Export → glTF 2.0*, with:
+
+| Setting | Value | Why |
+|---|---|---|
+| Format | glTF Binary (`.glb`) | One file, textures embedded. |
+| Include → Limit to | Selected Objects | |
+| Transform → +Y Up | on | The default. |
+| Data → Mesh → Apply Modifiers | on | Bevels, mirrors and arrays are otherwise lost. |
+| Data → Mesh → **Attributes** | **on** | Off by default, and without it the team mask is silently dropped. |
+
+**Export from a scene that contains only the model, or with nothing selected in
+any other scene.** Blender writes one glTF scene per Blender scene that has a
+selection, and the game loads only the first. Which one comes first is not
+something you choose, so when it is the wrong one the wrong model loads with no
+error. The game warns about any file with more than one scene.
+
+All of this was checked against a real export from Blender 5.2 rather than
+assumed; the file is kept as a test fixture at
+`packages/client/src/__fixtures__/blender-calibration.glb`, and
+`blender-export.test.ts` fails if any of it stops being true.
+
 ## Axes and origin
 
 - **+Y is up.** Blender's glTF exporter converts from Blender's Z-up by default;

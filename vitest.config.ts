@@ -2,6 +2,10 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // Models are assets. The client's own Vite build knows that by default; the
+  // test runner, which builds from the repository root with this config, does
+  // not -- and tries to parse a `.glb` fixture as JavaScript.
+  assetsInclude: ["**/*.glb"],
   resolve: {
     alias: {
       // Resolve workspace packages to SOURCE, so tests run against the files

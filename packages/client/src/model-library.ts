@@ -88,6 +88,16 @@ async function build(contentIdOf: (typeId: number) => string): Promise<ModelLibr
     entries.map(async ({ key, url }) => {
       try {
         const gltf = await loader.loadAsync(url);
+        if (gltf.scenes.length > 1) {
+          // Blender writes one glTF scene per Blender scene that has anything
+          // selected, and only the default one is loaded. Which one that is was
+          // never the artist's choice, so when it is wrong the wrong model loads
+          // with no error -- this is the only place it can be noticed.
+          console.warn(
+            `[rts] model ${key}: file contains ${gltf.scenes.length} scenes; only the first ` +
+              `("${gltf.scene.name}") is used. Export from a single scene.`,
+          );
+        }
         const parts = toParts(gltf.scene, (message) => console.warn(`[rts] model ${key}: ${message}`));
         if (parts.length === 0) {
           console.warn(`[rts] model ${key}: no meshes; using the built-in silhouette`);
