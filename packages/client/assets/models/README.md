@@ -13,6 +13,28 @@ rule still loads. It just looks wrong in the specific way the warning describes.
 See UNIVERSE.md for what things should *look* like. This file is only about what
 the engine needs.
 
+## The quality bar
+
+**No model ships below the level of detail of the Conscript**
+(`scripts/models/conscript.py`). That applies to every unit and building, for
+both races, new or reworked. The bar is:
+
+- **Modelled detail, not blocks.** The Conscript is about ninety pieces and uses
+  its whole triangle budget: hood, hinged visor, filter and hose, shingled
+  apron, straps, pouches, pads, boots, and a weapon with a drum, a shroud and
+  coils. A model assembled from a dozen boxes is a placeholder, not a model.
+- **Baked textures, never flat colours.** Colour, roughness and normal maps
+  baked from the procedural surfaces in `scripts/models/surfaces.py`, with wear,
+  grime, chipped edges and relief.
+- **One baked material, plus one for anything that glows**, with the team mask
+  kept as a vertex attribute.
+- **Checked in the game**, at playing zoom and close up, before it is called
+  done. Previews rendered in Blender are not enough.
+
+Existing models below the bar — the Servitor, still in flat colours, and the
+built-in silhouettes — are waiting to be rebuilt. Don't use them as the
+reference.
+
 ## Models built by script
 
 The shipped models are Python scripts in `scripts/models/`, run in Blender
