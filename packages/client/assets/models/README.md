@@ -150,8 +150,11 @@ unit wide and drawn four wide. Height is free, and is scaled by the same factor.
 Modelling a structure at its real size is the likeliest mistake to make, and it
 produces a building four times too large.
 
-Structures rise out of the ground while under construction by being scaled from
-the base up, so a structure should read sensibly squashed.
+A structure with no `build` clip rises out of the ground while under
+construction by being scaled from the base up, so it should read sensibly
+squashed. One with a `build` clip is drawn at full size and the clip shows the
+construction instead -- which every shipped building should have; see
+Structures below.
 
 ## Budget
 
@@ -257,6 +260,97 @@ squad has to fit the unit budget's width.
 
 `scripts/models/calibration_rig.py` is the smallest complete example, and
 `src/blender-rig.test.ts` checks what it exports.
+
+## Structures
+
+`scripts/models/bastion.py` is the reference for every building: read it before
+starting one. What it established, and what each new structure follows:
+
+**Scale and textures**
+
+- **Built in tiles at the real footprint** (a footprint of 4 is ±2), textured
+  and baked there, then shrunk by setting the armature's scale to
+  `1 / footprint`. The game multiplies it back up.
+- **`surfaces.structure_surfaces(scale=6.0)` for every structure**, whatever its
+  footprint. The scale is the size of wear relative to a figure, not to the
+  building, so one value keeps rust, chips and grime the same size across the
+  whole base.
+- **Texture size follows footprint**, to keep the texel density the same:
+  2048 for a footprint of 3 or 4, 1024 for 2.
+- The game camera looks from **+X and -Y** (Blender axes). Doors, intakes,
+  lights, paint and the finest detail go on those two faces; the far faces
+  carry pipes and plates for the silhouette, cheaply.
+
+**Readable at playing zoom**
+
+At the default zoom a tile is about 25 pixels on a 1080p screen; fully zoomed
+in, about 135. Anything that has to read in a match -- legs, a conveyor, a
+ramp, a stack -- is at least 0.15 tiles thick. Rails, rivets and weld beads are
+close-up detail and are allowed to vanish at playing zoom.
+
+- Team paint on large, camera-facing surfaces: the Bastion's cab, lintel and
+  leg struts. A stripe too small to see is no paint at all.
+- Emissive windows and lamps are what make a building read as working and
+  whose it is at a glance; every building has some.
+
+**Budget**
+
+8,000 triangles fills up fast with bevels. Pieces nobody can see -- under the
+hull, inside another piece, on the far side -- get no bevel, fewer segments, or
+are left out. Count with `kit.report` before baking.
+
+**Clips**
+
+Every structure has `build`, `idle`, and, if it produces, `produce` and
+`release`. They are keyed with `kit.track_clip`: one bone per moving assembly,
+each piece weighted wholly to one bone, and location, scale and `stretch` (along
+a bone) as well as rotation.
+
+- **`build` says what the race is.** UNIVERSE.md: the Directorate's buildings
+  are dropped, not built, so they arrive -- land, unfold, bolt down, run up.
+  The Verdigris does not build, it grows through: its structures should
+  spread over and out of what was already there.
+- **`build` starts with something on the ground.** Progress 0 is visible the
+  moment a site is placed: the Bastion's apron is there before its hull.
+- **`build` keeps the building over its own footprint.** Anything hovering high
+  above reads as a different building further up the screen; the Bastion's hull
+  starts 3.2 tiles up, and at 6 it was mistaken for a second one.
+- **`build` ends exactly at rest**, because it blends straight into `idle`.
+- **Parts that only appear during a clip are hidden inside the model at rest**
+  (the Bastion's thruster flames sit inside the hull), or scaled to 0 in every
+  clip. The bind pose is what the portrait shows.
+- **`produce` loops cleanly**: its first and last keys are the same pose, and
+  anything that spins is keyed `linear` so it does not ease through every
+  quarter turn.
+- **`release` happens on a camera-facing face**, and is short: under two
+  seconds, since a queue can finish a unit every few.
+
+A research clip will follow the same pattern once the simulation has research.
+
+## Checking a model in the game
+
+`npm run dev`, start a skirmish, and drive the match from the console through
+`window.__rts` (development builds only):
+
+```js
+const g = window.__rts;
+g.rig.lookAtGround(x, z);            // centre on a tile
+g.rig.viewHeight = 8; g.rig.zoomBy(1); // 8 is fully zoomed in, 44 the default; zoomBy applies it
+g.step(n, commands);                  // advance the simulation n ticks, with commands
+await g.capture("name", 1400);        // writes .captures/name.png
+```
+
+- **Render frames across real time before capturing an animation.** A hidden
+  window does not run `requestAnimationFrame`, and each frame advances clips
+  by at most 0.1 s; call `g.renderFrame()` every ~16 ms for as long as the
+  clip should have played.
+- **Construction** can be checked at any stage by writing
+  `g.world.entities.buildRemaining[i]` for a site in a local skirmish: it is
+  presentation-only checking, in a match nobody else is in.
+- **Writing a `.glb` into this folder reloads the page** under the dev server,
+  which ends the match. Rebuild first, then start the skirmish.
+- The console logs each model's bones and clips at load, and warns about
+  anything that breaks the rules here.
 
 ## Not supported yet
 

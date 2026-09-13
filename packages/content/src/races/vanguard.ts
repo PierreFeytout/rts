@@ -18,7 +18,7 @@
 export const vanguard = {
   id: "vanguard",
   name: "The Ashen Directorate",
-  blurb: "The combine that owns the paperwork. Conscripts, contracts, and kinetic lines.",
+  blurb: "The power that owns the paperwork. Conscripts, contracts, and kinetic lines.",
   startBuilding: "vanguard.nexus",
   startUnit: "vanguard.drone",
 

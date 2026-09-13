@@ -22,7 +22,7 @@
 export const concord = {
   id: "concord",
   name: "The Verdigris",
-  blurb: "Corrosion that organised. It does not build; it grows through.",
+  blurb: "Corrosion that learned to think together. It does not build; it grows through.",
   startBuilding: "concord.heartwood",
   startUnit: "concord.sporeling",
 
