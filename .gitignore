@@ -18,3 +18,4 @@ release/
 *.blend1
 # Default output of scripts/models/*.py previews when RTS_PREVIEW_DIR is unset.
 art/previews/
+__pycache__/

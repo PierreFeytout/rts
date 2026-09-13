@@ -168,13 +168,20 @@ export function toParts(root: THREE.Object3D, warn: (message: string) => void = 
  * the same here: un-indexed, float, and carrying position, normal, uv, colour
  * and team mask whether or not the source had them.
  */
-function normalise(source: THREE.BufferGeometry, matrix: THREE.Matrix4): THREE.BufferGeometry {
+export function normalise(
+  source: THREE.BufferGeometry,
+  matrix: THREE.Matrix4,
+  keepSkin = false,
+): THREE.BufferGeometry {
   const geometry = source.index ? source.toNonIndexed() : source.clone();
 
+  // Skin weights survive only for a skinned model. On anything else they would
+  // be attributes no shader reads, and attributes that make otherwise identical
+  // parts refuse to merge.
+  const kept = ["position", "normal", "uv", "color", GLTF_TEAM_MASK];
+  if (keepSkin) kept.push("skinIndex", "skinWeight");
   for (const name of Object.keys(geometry.attributes)) {
-    if (!["position", "normal", "uv", "color", GLTF_TEAM_MASK].includes(name)) {
-      geometry.deleteAttribute(name);
-    }
+    if (!kept.includes(name)) geometry.deleteAttribute(name);
   }
   for (const name of Object.keys(geometry.attributes)) {
     geometry.setAttribute(name, toFloat(geometry.getAttribute(name)));
@@ -253,7 +260,11 @@ function flipWinding(geometry: THREE.BufferGeometry): void {
  * a model that renders flat is a better problem to be told about than one that
  * does not render.
  */
-function standardise(material: THREE.Material, warn: (message: string) => void): THREE.MeshStandardMaterial {
+export function standardise(
+  material: THREE.Material,
+  warn: (message: string) => void,
+  skinning?: THREE.Texture,
+): THREE.MeshStandardMaterial {
   let standard: THREE.MeshStandardMaterial;
   if ((material as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
     standard = material as THREE.MeshStandardMaterial;
@@ -270,7 +281,7 @@ function standardise(material: THREE.Material, warn: (message: string) => void):
   // Every part carries a colour attribute after `normalise`, white where the
   // file had none, so turning vertex colours on is always safe.
   standard.vertexColors = true;
-  applyTeamMask(standard);
+  applyTeamMask(standard, skinning);
   return standard;
 }
 
@@ -300,8 +311,10 @@ function standardise(material: THREE.Material, warn: (message: string) => void):
  * colour. Masked areas authored at about 45% grey come out as the pure team
  * colour; darker comes out darker.
  */
-export function applyTeamMask(material: THREE.MeshStandardMaterial): void {
+export function applyTeamMask(material: THREE.MeshStandardMaterial, skinning?: THREE.Texture): void {
   material.onBeforeCompile = (shader) => {
+    if (skinning) shader.uniforms.rtsAnimation = { value: skinning };
+
     shader.vertexShader = shader.vertexShader
       .replace(
         "#include <common>",
@@ -311,7 +324,8 @@ attribute vec3 instanceTeam;
 attribute float instanceShade;
 varying float vTeamMask;
 varying vec3 vTeam;
-varying float vShade;`,
+varying float vShade;
+${skinning ? SKINNING_DECLARATIONS : ""}`,
       )
       .replace(
         "#include <begin_vertex>",
@@ -320,6 +334,17 @@ vTeamMask = ${TEAM_MASK};
 vTeam = instanceTeam;
 vShade = instanceShade;`,
       );
+
+    if (skinning) {
+      // three.js's own skinning chunks sit exactly where this belongs -- after
+      // the normal is read, and after the position is -- and do nothing unless
+      // USE_SKINNING is defined, which it never is here. Replacing them keeps
+      // the order of operations identical to a SkinnedMesh.
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <skinbase_vertex>", SKINNING_POSE)
+        .replace("#include <skinnormal_vertex>", "objectNormal = mat3( rtsSkin ) * objectNormal;")
+        .replace("#include <skinning_vertex>", "transformed = ( rtsSkin * vec4( transformed, 1.0 ) ).xyz;");
+    }
 
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -345,10 +370,59 @@ varying float vShade;`,
 totalEmissiveRadiance *= vShade;`,
       );
   };
-  // Every patched material compiles to the same program shape, and an unkeyed
+  // Every patched material compiles to one of two program shapes, and an unkeyed
   // patch would let three.js hand an unpatched cached program to it instead.
-  material.customProgramCacheKey = () => "rts-team-mask";
+  const key = skinning ? "rts-team-mask-skinned" : "rts-team-mask";
+  material.customProgramCacheKey = () => key;
 }
+
+/**
+ * Skinning from a baked animation texture. See skinned-parts.ts for the layout.
+ *
+ * One row per baked frame, four texels per bone, each bone's matrix stored
+ * column by column -- the same packing three.js uses for its own bone texture,
+ * so `mat4( v1, v2, v3, v4 )` reads it back exactly.
+ *
+ * `instanceAnimation` is per instance: the frame to show (fractional, so it
+ * blends to the next row), a second frame, and how far to blend toward that
+ * second one. The second pose is what lets a unit that stops walking ease into
+ * standing rather than snapping.
+ */
+const SKINNING_DECLARATIONS = `
+uniform highp sampler2D rtsAnimation;
+attribute vec4 skinIndex;
+attribute vec4 skinWeight;
+attribute vec3 instanceAnimation;
+
+mat4 rtsBone( const in int bone, const in int row ) {
+  int x = bone * 4;
+  return mat4(
+    texelFetch( rtsAnimation, ivec2( x, row ), 0 ),
+    texelFetch( rtsAnimation, ivec2( x + 1, row ), 0 ),
+    texelFetch( rtsAnimation, ivec2( x + 2, row ), 0 ),
+    texelFetch( rtsAnimation, ivec2( x + 3, row ), 0 )
+  );
+}
+
+mat4 rtsPose( const in float frame ) {
+  int row = int( floor( frame ) );
+  float t = fract( frame );
+  mat4 pose = mat4( 0.0 );
+  for ( int k = 0; k < 4; k++ ) {
+    int bone = int( skinIndex[ k ] );
+    // Every clip is baked with one extra row, so row + 1 always exists.
+    pose += skinWeight[ k ] * ( rtsBone( bone, row ) * ( 1.0 - t ) + rtsBone( bone, row + 1 ) * t );
+  }
+  return pose;
+}
+`;
+
+const SKINNING_POSE = `
+mat4 rtsSkin = rtsPose( instanceAnimation.x );
+if ( instanceAnimation.z > 0.0 ) {
+  rtsSkin = rtsSkin * ( 1.0 - instanceAnimation.z ) + rtsPose( instanceAnimation.y ) * instanceAnimation.z;
+}
+`;
 
 /**
  * The per-instance attributes the team shader reads, sized for `capacity`.
@@ -385,7 +459,11 @@ export const PART_BUDGET = 4;
  * Every one of these produces a model that loads and looks broken in a specific
  * way, and the message says which way.
  */
-export function checkContract(parts: readonly ModelPart[], kind: ModelKind): string[] {
+export function checkContract(
+  parts: readonly ModelPart[],
+  kind: ModelKind,
+  squad: ReadonlyArray<{ x: number; z: number }> = [{ x: 0, z: 0 }],
+): string[] {
   const issues: string[] = [];
   if (parts.length === 0) return ["no meshes"];
 
@@ -420,7 +498,13 @@ export function checkContract(parts: readonly ModelPart[], kind: ModelKind): str
       );
     }
   } else {
-    const extent = Math.max(bounds.max.x - bounds.min.x, bounds.max.z - bounds.min.z);
+    // A squad is as wide as its figures are spread, plus one figure's width.
+    const xs = squad.map((s) => s.x);
+    const zs = squad.map((s) => s.z);
+    const extent = Math.max(
+      Math.max(...xs) + bounds.max.x - (Math.min(...xs) + bounds.min.x),
+      Math.max(...zs) + bounds.max.z - (Math.min(...zs) + bounds.min.z),
+    );
     if (extent > 1.6) {
       issues.push(`${extent.toFixed(2)} world units across, larger than a unit can be and still fit through a gap`);
     }

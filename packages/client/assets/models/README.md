@@ -148,14 +148,64 @@ game warns when a model has none.
 - Vertex colours are honoured, and multiply with the base colour.
 - Emission is honoured, and dims correctly in fog.
 
+## Animation and squads
+
+A model with an armature is **skinned**, and animates. Everything else is static.
+
+The game bakes every clip into a texture when it loads and plays them on the
+GPU, so four hundred animated figures cost what four hundred static ones do. That
+buys speed with a few rules:
+
+- **One armature, and every mesh skinned to it.** A mesh merely parented to a
+  bone is left out, with a warning naming it. For hard pieces -- a rifle, a
+  helmet, a shoulder plate -- weight the whole piece to one bone at 1.0 instead
+  of parenting it. `kit.rigid_part` in scripts/models does exactly that.
+- **Clips are actions, named for what they are.** The game plays:
+
+  | Clip | When | Plays |
+  |---|---|---|
+  | `idle` | standing | looped |
+  | `walk` | moving | looped, sped up or slowed to match the unit's speed |
+  | `fire` | on every shot | once, then back to `idle` or `walk` |
+
+  Any clip named `fire`, `attack`, `death` or `die` plays once; every other name
+  loops. A missing clip falls back to `idle`, and a model with no clips at all
+  is drawn in its bind pose.
+- **Key at 30 frames per second.** That is the rate clips are baked at; a
+  one-frame recoil keyed at 24 fps falls between two baked frames.
+- **Rotation is what animates well.** Keys are baked exactly, but the shader
+  blends between baked frames linearly, which is invisible for a limb and
+  noticeable for a whole figure spinning through half a turn in one frame.
+- Export with **Animation → Mode: Actions**, **Skinning** on, and **Apply
+  Modifiers off** -- applying the armature modifier bakes a pose into the mesh.
+  Apply any other modifier (a bevel) by hand before exporting, or it is lost.
+  Keep each action on its own NLA track so the exporter finds all of them.
+
+### Squads
+
+One entity can be drawn as several figures -- a squad of three Conscripts is one
+unit with one health bar. Put a custom property **`rts_squad`** on the armature
+(or any object) holding three numbers per figure:
+
+    [forward, left, phase,  forward, left, phase, ...]
+
+`forward` and `left` are the figure's offset from the unit's centre in Blender
+axes; `phase` (0 to 1) starts its loops part-way through, so the squad does not
+march in lockstep. Export with **Include → Custom Properties** on. As the unit
+takes damage the squad thins, the last figure standing until it dies. The whole
+squad has to fit the unit budget's width.
+
+`scripts/models/calibration_rig.py` is the smallest complete example, and
+`src/blender-rig.test.ts` checks what it exports.
+
 ## Not supported yet
 
-- **Animation of any kind.** Every mesh in the file is merged into its model's
-  parts at load, transforms and all, so a turret parented to a hull is baked in
-  place and cannot turn. Rigid-part animation (turret yaw, hover bob) needs named
-  pivots and is the next thing to add. Skeletal animation — anything that walks —
-  needs changes to how units are drawn, because four hundred instanced units and
-  per-unit skeletons do not go together cheaply.
+- **Rigid-part animation without a skeleton** -- a turret that turns to face its
+  target independently of its hull. Clips play the same for every copy of a
+  model, so nothing can aim a bone per unit; for now a turret faces where its
+  hull does.
+- **Death animations.** A unit that dies is removed from the world at once, and
+  there is not yet anything to keep drawing its corpse.
 - Multiple materials on one mesh. Split the mesh per material, or let the
   exporter do it; only the first material of a multi-material mesh is used.
 - Transparency.

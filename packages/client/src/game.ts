@@ -205,6 +205,8 @@ export function startGame(options: GameOptions): RunningGame {
     };
     target.onAfterTick = (w) => {
       effects.ingest(w);
+      // Shots, so a unit that fired plays its firing clip.
+      units.ingest(w);
       hud.ingest(w);
       conductor.ingest(w);
       conductor.update(TICK_MS);

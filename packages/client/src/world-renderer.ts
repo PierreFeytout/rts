@@ -1,4 +1,5 @@
 import {
+  EV_SHOT,
   KIND_BUILDING,
   KIND_RESOURCE,
   MAX_ENTITIES,
@@ -6,12 +7,14 @@ import {
   VIS_VISIBLE,
   entityIndex,
   type EntityId,
+  type EntityType,
   type World,
 } from "@rts/sim";
 import * as THREE from "three";
 import { bamToThreeY, simToWorld } from "./coords.js";
 import type { Model, ModelLibrary } from "./model-library.js";
 import { teamAttributes } from "./model-parts.js";
+import { frameAt, type AnimationBake, type BakedClip } from "./skinned-parts.js";
 import { NEUTRAL_COLOUR, VENT_COLOUR, teamColour } from "./palette.js";
 
 /**
@@ -40,7 +43,44 @@ interface Batch {
   meshes: THREE.InstancedMesh[];
   team: THREE.InstancedBufferAttribute;
   shade: THREE.InstancedBufferAttribute;
+  /** Frame, second frame and blend per instance. Rigged models only. */
+  animation: THREE.InstancedBufferAttribute | null;
+  /** Instances, not units: a squad of three is three of these. */
+  capacity: number;
   count: number;
+}
+
+/** Which clip a unit wants. Resolved to a real clip per model; see `clipFor`. */
+const IDLE = 0;
+const WALK = 1;
+const FIRE = 2;
+
+/**
+ * Seconds to blend from one clip into the next.
+ *
+ * Short. The point is only that a unit which stops does not snap from mid-stride
+ * to standing; anything longer and a squad that stops and fires is still
+ * visibly walking when its first shot lands.
+ */
+const BLEND_SECONDS = 0.18;
+
+/**
+ * The clip a model actually has for what a unit wants to do.
+ *
+ * A model is not required to have every clip. One with no firing animation
+ * stands and shoots; one with no walk slides at rest; one with no clips at all
+ * was baked with a single "rest" pose. Missing animation is a thing to fix in
+ * the model, never a reason for a unit to vanish or throw.
+ */
+function clipFor(bake: AnimationBake, wanted: number): BakedClip {
+  const name = wanted === FIRE ? "fire" : wanted === WALK ? "walk" : "idle";
+  return (
+    bake.clips.get(name) ??
+    bake.clips.get("idle") ??
+    bake.clips.get("rest") ??
+    // Baking always produces at least one clip, so this cannot come back empty.
+    bake.clips.values().next().value!
+  );
 }
 
 
@@ -86,6 +126,22 @@ export class WorldRenderer {
 
   private readonly scratch = new THREE.Object3D();
   private readonly colour = new THREE.Color();
+
+  /*
+   * Animation, per entity slot. Presentation only, like everything else here:
+   * none of it is read by the simulation, and two peers on different frames of a
+   * walk cycle agree about everything that matters.
+   */
+  /** The entity id each slot's animation belongs to, so a reused slot restarts. */
+  private readonly animOwner = new Float64Array(MAX_ENTITIES).fill(-1);
+  private readonly animClip = new Int8Array(MAX_ENTITIES);
+  private readonly animTime = new Float32Array(MAX_ENTITIES);
+  private readonly animPrev = new Int8Array(MAX_ENTITIES);
+  private readonly animPrevTime = new Float32Array(MAX_ENTITIES);
+  private readonly animBlend = new Float32Array(MAX_ENTITIES);
+  /** When each entity last fired, in seconds on the frame clock. */
+  private readonly lastShot = new Float64Array(MAX_ENTITIES).fill(-Infinity);
+  private lastFrame = -1;
   /**
    * Camera orientation, baked into every health bar instance.
    *
@@ -160,6 +216,12 @@ export class WorldRenderer {
     const types = world.types;
     const vision = world.vision;
 
+    // Animation runs on the frame clock, not the tick clock: a walk cycle that
+    // advanced twenty times a second would stutter on every display.
+    const now = performance.now() / 1000;
+    const dt = this.lastFrame < 0 ? 0 : Math.min(0.1, now - this.lastFrame);
+    this.lastFrame = now;
+
     for (const batch of this.batches.values()) batch.count = 0;
     let nRings = 0;
     let nBars = 0;
@@ -196,7 +258,7 @@ export class WorldRenderer {
 
       const batch = this.batch(this.library.forType(type));
       const n = batch.count;
-      if (n < MODEL_CAPACITY) {
+      if (n < batch.capacity) {
         let light = shade;
         if (type.kind === KIND_RESOURCE) {
           // Structures, scenery included, are authored in a 1 x 1 box and scaled
@@ -221,18 +283,22 @@ export class WorldRenderer {
           // never mistaken for a working one at a glance.
           if (building) light *= 0.5;
         } else {
-          this.scratch.position.set(x, 0, z);
-          this.scratch.rotation.set(0, bamToThreeY(lerpAngle(pf, e.facing[i], alpha)), 0);
-          this.scratch.scale.setScalar(1);
           this.colour.setHex(teamColour(owner));
         }
 
-        this.scratch.updateMatrix();
-        // The matrix buffer is shared by every part, so one write moves them all.
-        batch.meshes[0].setMatrixAt(n, this.scratch.matrix);
-        batch.team.setXYZ(n, this.colour.r, this.colour.g, this.colour.b);
-        batch.shade.setX(n, light);
-        batch.count = n + 1;
+        if (type.kind === KIND_RESOURCE || type.kind === KIND_BUILDING) {
+          this.scratch.updateMatrix();
+          // The matrix buffer is shared by every part, so one write moves them all.
+          batch.meshes[0].setMatrixAt(n, this.scratch.matrix);
+          batch.team.setXYZ(n, this.colour.r, this.colour.g, this.colour.b);
+          batch.shade.setX(n, light);
+          batch.count = n + 1;
+        } else {
+          // How far the unit moved this tick, which picks and paces its walk.
+          const step = fresh ? 0 : Math.hypot(e.posX[i] - this.prevX[i], e.posY[i] - this.prevY[i]);
+          const yaw = bamToThreeY(lerpAngle(pf, e.facing[i], alpha));
+          this.drawUnit(batch, i, type, e.idAt(i), step, x, z, yaw, light, e.health[i], dt, now);
+        }
       }
 
       if (isMine && nRings < this.rings.instanceMatrix.count) {
@@ -277,10 +343,146 @@ export class WorldRenderer {
       batch.meshes[0].instanceMatrix.needsUpdate = true;
       batch.team.needsUpdate = true;
       batch.shade.needsUpdate = true;
+      if (batch.animation) batch.animation.needsUpdate = true;
     }
     commit(this.rings, nRings);
     commit(this.barBack, nBars);
     commit(this.barFill, nBars);
+  }
+
+  /**
+   * Read one tick's shots, so a unit that fired plays its firing clip.
+   *
+   * Call from the session's after-tick hook, while `world.events` still holds
+   * the tick -- the same place effects and the HUD read it.
+   */
+  ingest(world: World): void {
+    const now = performance.now() / 1000;
+    for (const event of world.events.all) {
+      if (event.kind === EV_SHOT) this.lastShot[entityIndex(event.shooter)] = now;
+    }
+  }
+
+  /**
+   * One unit: every figure of its squad, each on its own frame.
+   *
+   * A squad thins as it is hurt -- one figure fewer for each share of its health
+   * lost -- so a battered squad is visible as one at a glance, without reading a
+   * health bar. It is still one unit to the simulation, with one health pool;
+   * the missing figures are purely how the damage is shown.
+   */
+  private drawUnit(
+    batch: Batch,
+    i: number,
+    type: EntityType,
+    id: EntityId,
+    step: number,
+    x: number,
+    z: number,
+    yaw: number,
+    light: number,
+    health: number,
+    dt: number,
+    now: number,
+  ): void {
+    const { squad, animation } = batch.model;
+    const figures =
+      squad.length > 1
+        ? Math.max(1, Math.min(squad.length, Math.ceil((squad.length * health) / type.maxHealth)))
+        : 1;
+
+    let clip: BakedClip | null = null;
+    let prev: BakedClip | null = null;
+    if (animation) {
+      this.animate(i, id, step, type, animation, dt, now);
+      clip = clipFor(animation, this.animClip[i]);
+      prev = clipFor(animation, this.animPrev[i]);
+    }
+
+    // The squad turns with the unit. A positive yaw about Y takes +X toward -Z.
+    const cos = Math.cos(yaw);
+    const sin = Math.sin(yaw);
+
+    for (let k = 0; k < figures && batch.count < batch.capacity; k++) {
+      const slot = squad[k];
+      this.scratch.position.set(x + slot.x * cos + slot.z * sin, 0, z - slot.x * sin + slot.z * cos);
+      this.scratch.rotation.set(0, yaw, 0);
+      this.scratch.scale.setScalar(1);
+      this.scratch.updateMatrix();
+
+      const n = batch.count;
+      batch.meshes[0].setMatrixAt(n, this.scratch.matrix);
+      batch.team.setXYZ(n, this.colour.r, this.colour.g, this.colour.b);
+      batch.shade.setX(n, light);
+      if (batch.animation && clip && prev) {
+        // Each figure is offset into the clip by its phase, so three soldiers
+        // walking together do not step in unison like clockwork.
+        const offset = (c: BakedClip): number => (c.loop ? slot.phase * c.duration : 0);
+        batch.animation.setXYZ(
+          n,
+          frameAt(clip, this.animTime[i] + offset(clip)),
+          frameAt(prev, this.animPrevTime[i] + offset(prev)),
+          this.animBlend[i],
+        );
+      }
+      batch.count = n + 1;
+    }
+  }
+
+  /**
+   * Decide which clip a unit should be playing, and move it along.
+   *
+   * Firing beats walking beats standing still. A change of clip does not cut: the
+   * clip being left is kept running for a moment and blended out on the GPU.
+   */
+  private animate(
+    i: number,
+    id: EntityId,
+    step: number,
+    type: EntityType,
+    bake: AnimationBake,
+    dt: number,
+    now: number,
+  ): void {
+    if (this.animOwner[i] !== id) {
+      // A new unit, or a slot reused by one. Start somewhere in the idle cycle
+      // rather than at its first frame, so units trained together do not breathe
+      // in unison either.
+      this.animOwner[i] = id;
+      this.animClip[i] = IDLE;
+      this.animPrev[i] = IDLE;
+      this.animTime[i] = ((i * 0.6180339) % 1) * 2;
+      this.animPrevTime[i] = 0;
+      this.animBlend[i] = 0;
+      this.lastShot[i] = -Infinity;
+    }
+
+    // `step` is how far the unit moved on the last tick. A little movement is not
+    // walking: separation nudges a standing crowd apart, and a squad shuffled a
+    // hair sideways should not break into a stride.
+    const moving = type.moveSpeed > 0 && step > type.moveSpeed * 0.15;
+
+    const fire = bake.clips.get("fire");
+    const firing = fire !== undefined && now - this.lastShot[i] < fire.duration;
+
+    const wanted = firing ? FIRE : moving ? WALK : IDLE;
+    if (wanted !== this.animClip[i]) {
+      this.animPrev[i] = this.animClip[i];
+      this.animPrevTime[i] = this.animTime[i];
+      this.animBlend[i] = 1;
+      this.animClip[i] = wanted;
+      if (wanted === FIRE) this.animTime[i] = 0;
+    } else if (wanted === FIRE && now - this.lastShot[i] < this.animTime[i]) {
+      // Fired again before the last shot's clip finished: start the recoil over.
+      this.animTime[i] = 0;
+    }
+
+    // A walk plays at the speed the unit is actually covering ground, so a unit
+    // slowed in a crowd shuffles rather than moonwalking at full stride.
+    const rate = moving ? Math.min(1.5, Math.max(0.5, step / type.moveSpeed)) : 1;
+    this.animTime[i] += dt * rate;
+    this.animPrevTime[i] += dt;
+    this.animBlend[i] = Math.max(0, this.animBlend[i] - dt / BLEND_SECONDS);
   }
 
   /**
@@ -294,19 +496,27 @@ export class WorldRenderer {
     const existing = this.batches.get(model.key);
     if (existing) return existing;
 
-    const { team, shade } = teamAttributes(MODEL_CAPACITY);
+    // Room for every figure, not every unit.
+    const capacity = MODEL_CAPACITY * model.squad.length;
+    const { team, shade } = teamAttributes(capacity);
+    const animation = model.animation
+      ? new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3)
+      : null;
+    animation?.setUsage(THREE.DynamicDrawUsage);
+
     const meshes: THREE.InstancedMesh[] = [];
     for (const part of model.parts) {
       const geometry = part.geometry.clone();
       geometry.setAttribute("instanceTeam", team);
       geometry.setAttribute("instanceShade", shade);
-      const mesh = makeInstanced(this.scene, geometry, part.material, MODEL_CAPACITY);
+      if (animation) geometry.setAttribute("instanceAnimation", animation);
+      const mesh = makeInstanced(this.scene, geometry, part.material, capacity);
       // One matrix buffer for all of a model's parts. They are the same units.
       if (meshes.length > 0) mesh.instanceMatrix = meshes[0].instanceMatrix;
       meshes.push(mesh);
     }
 
-    const batch: Batch = { model, meshes, team, shade, count: 0 };
+    const batch: Batch = { model, meshes, team, shade, animation, capacity, count: 0 };
     this.batches.set(model.key, batch);
     return batch;
   }

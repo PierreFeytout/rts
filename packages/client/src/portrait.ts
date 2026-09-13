@@ -2,6 +2,7 @@ import type { EntityType } from "@rts/sim";
 import * as THREE from "three";
 import type { ModelLibrary } from "./model-library.js";
 import { teamAttributes } from "./model-parts.js";
+import { frameAt } from "./skinned-parts.js";
 
 /**
  * Portraits and command icons, rendered from the unit's own model.
@@ -120,6 +121,15 @@ export function portraitFor(
     team.setXYZ(0, tint.r, tint.g, tint.b);
     geometry.setAttribute("instanceTeam", team);
     geometry.setAttribute("instanceShade", shade);
+    if (model.animation) {
+      // A rigged model is shown standing at ease, whatever the unit is doing --
+      // a portrait frozen mid-stride reads as a rendering glitch. A squad is
+      // shown as one of its figures: at portrait size, one soldier is a soldier,
+      // three are a smudge.
+      const rest = model.animation.clips.get("idle") ?? model.animation.clips.values().next().value!;
+      const pose = new THREE.InstancedBufferAttribute(new Float32Array([frameAt(rest, 0), 0, 0]), 3);
+      geometry.setAttribute("instanceAnimation", pose);
+    }
     geometry.computeBoundingBox();
     box.union(geometry.boundingBox!);
 

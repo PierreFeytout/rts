@@ -10,6 +10,7 @@ import {
   type ModelPart,
 } from "./model-parts.js";
 import { MODEL_COUNT, buildModels, isStructureRole, modelFor, roleName } from "./models.js";
+import { SINGLE, isSkinned, toSkinnedParts, type AnimationBake, type SquadSlot } from "./skinned-parts.js";
 
 /**
  * Every model the game can draw, authored or procedural, loaded once.
@@ -45,6 +46,10 @@ export interface Model {
   /** Authored in a unit box and scaled to its footprint by the renderer. */
   readonly structure: boolean;
   readonly authored: boolean;
+  /** Present for a rigged model: its clips, baked. See skinned-parts.ts. */
+  readonly animation?: AnimationBake;
+  /** Where its figures stand. One figure at the centre unless the file says so. */
+  readonly squad: readonly SquadSlot[];
 }
 
 export interface ModelLibrary {
@@ -75,7 +80,13 @@ async function build(contentIdOf: (typeId: number) => string): Promise<ModelLibr
   const procedural = buildModels();
   for (let role = 0; role < MODEL_COUNT; role++) {
     const key = proceduralKey(roleName(role));
-    models.set(key, { key, parts: procedural[role], structure: isStructureRole(role), authored: false });
+    models.set(key, {
+      key,
+      parts: procedural[role],
+      structure: isStructureRole(role),
+      authored: false,
+      squad: SINGLE,
+    });
   }
 
   const loader = new GLTFLoader();
@@ -98,12 +109,33 @@ async function build(contentIdOf: (typeId: number) => string): Promise<ModelLibr
               `("${gltf.scene.name}") is used. Export from a single scene.`,
           );
         }
-        const parts = toParts(gltf.scene, (message) => console.warn(`[rts] model ${key}: ${message}`));
+        const warn = (message: string): void => console.warn(`[rts] model ${key}: ${message}`);
+
+        if (isSkinned(gltf.scene)) {
+          // Rigged: bake every clip into a texture now, once, rather than
+          // animating skeletons on the CPU for every figure every frame.
+          const skinned = toSkinnedParts(gltf.scene, gltf.animations, warn);
+          models.set(key, {
+            key,
+            parts: skinned.parts,
+            structure: false,
+            authored: true,
+            animation: skinned.bake,
+            squad: skinned.squad,
+          });
+          console.info(
+            `[rts] model ${key}: ${skinned.bake.bones} bones, clips ${[...skinned.bake.clips.keys()].join(", ")}` +
+              (skinned.squad.length > 1 ? `, squad of ${skinned.squad.length}` : ""),
+          );
+          return;
+        }
+
+        const parts = toParts(gltf.scene, warn);
         if (parts.length === 0) {
           console.warn(`[rts] model ${key}: no meshes; using the built-in silhouette`);
           return;
         }
-        models.set(key, { key, parts, structure: false, authored: true });
+        models.set(key, { key, parts, structure: false, authored: true, squad: SINGLE });
       } catch (error) {
         // A broken file costs its own model, not the game. The silhouette it
         // would have replaced is still there.
@@ -144,7 +176,7 @@ async function build(contentIdOf: (typeId: number) => string): Promise<ModelLibr
       if (model.authored && !checked.has(key)) {
         checked.add(key);
         const kind: ModelKind = structure ? "structure" : "unit";
-        for (const issue of checkContract(model.parts, kind)) {
+        for (const issue of checkContract(model.parts, kind, model.squad)) {
           console.warn(`[rts] model ${key}: ${issue}`);
         }
       }

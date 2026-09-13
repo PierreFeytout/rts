@@ -100,6 +100,9 @@ def directorate_palette():
         "iron": material("iron", (0.23, 0.18, 0.13), roughness=0.58, metallic=0.25),
         "dark": material("dark", (0.032, 0.027, 0.023), roughness=0.72, metallic=0.18),
         "paint": material("paint", (0.45, 0.45, 0.45), roughness=0.62, metallic=0.08),
+        # Bone-coloured heat shielding. The only near-neutral in the palette, and
+        # used in quantity only where ceramic is what the thing is made of.
+        "ceramic": material("ceramic", (0.42, 0.36, 0.28), roughness=0.78, metallic=0.0),
         "lamp": material(
             "lamp", (0.9, 0.52, 0.16), roughness=0.4, metallic=0.0,
             # Strength 2.5, not more. At 6 the lamp saturated to white in the game,
@@ -328,3 +331,186 @@ def previews(col, out_dir, name, views=((35, 30), (35, 210), (60, 120))):
         bpy.data.objects.remove(obj, do_unlink=True)
     bpy.data.collections.remove(helpers)
     return written
+
+
+# ---------------------------------------------------------------------------
+# Rigs and animation
+#
+# The game bakes every clip into a texture at load (packages/client/src/
+# skinned-parts.ts) and has three rules for a rigged model, which these helpers
+# follow so that a model script cannot break them:
+#
+#   - one armature, and everything drawn is skinned to it -- nothing parented
+#     to a bone, which the game leaves out;
+#   - clips are actions named for what they are: "idle" and "walk" loop, "fire"
+#     plays once;
+#   - a squad is a custom property `rts_squad` on the armature, exported as a
+#     glTF extra.
+# ---------------------------------------------------------------------------
+
+def select_only(*objects):
+    """Select exactly `objects`, the first one active, as operators expect.
+
+    Walks the scene's objects after a view-layer update rather than the view
+    layer's list directly: straight after objects are removed, that list still
+    holds empty entries for them.
+    """
+    view_layer = bpy.context.view_layer
+    view_layer.update()
+    for other in bpy.context.scene.objects:
+        other.select_set(False)
+    for obj in objects:
+        obj.select_set(True)
+    view_layer.objects.active = objects[0]
+
+
+def armature(name, col, bones):
+    """Build an armature from `(name, head, tail, parent)` tuples, in Blender axes."""
+    data = bpy.data.armatures.new(name)
+    obj = bpy.data.objects.new(name, data)
+    col.objects.link(obj)
+
+    select_only(obj)
+    bpy.ops.object.mode_set(mode="EDIT")
+    made = {}
+    for bone_name, head, tail, parent in bones:
+        eb = data.edit_bones.new(bone_name)
+        eb.head = Vector(head)
+        eb.tail = Vector(tail)
+        eb.roll = 0.0
+        if parent is not None:
+            eb.parent = made[parent]
+            eb.use_connect = False
+        made[bone_name] = eb
+    bpy.ops.object.mode_set(mode="OBJECT")
+    return obj
+
+
+def rigid_part(name, bm, mat, col, bone, painted=False):
+    """One piece of a rigged model, weighted entirely to one bone.
+
+    Rigid skinning -- every vertex of a piece follows one bone -- is exactly how
+    armour behaves, and at the size a unit is drawn nobody can see a knee that
+    does not deform. It also keeps the weights trivially correct, which automatic
+    weighting on a figure a few centimetres tall is not.
+    """
+    obj = mesh_object(name, bm, mat, col, painted=painted)
+    group = obj.vertex_groups.new(name=bone)
+    group.add(list(range(len(obj.data.vertices))), 1.0, "REPLACE")
+    return obj
+
+
+def join(parts, name):
+    """Merge rigid parts into one mesh. Vertex groups, materials and the team
+    mask are merged by name, so each part keeps its bone and its paint."""
+    # Bevels and the like are applied first. A rigged model is exported without
+    # applying modifiers -- applying the armature would bake a pose -- so any
+    # other modifier still on the mesh would silently never reach the game.
+    for obj in parts:
+        select_only(obj)
+        for modifier in list(obj.modifiers):
+            bpy.ops.object.modifier_apply(modifier=modifier.name)
+    select_only(*parts)
+    bpy.ops.object.join()
+    joined = bpy.context.view_layer.objects.active
+    joined.name = name
+    joined.data.name = name
+    return joined
+
+
+def bind(mesh, rig):
+    """Skin a mesh to an armature: parent it, and let the armature deform it."""
+    mesh.parent = rig
+    modifier = mesh.modifiers.new("rig", "ARMATURE")
+    modifier.object = rig
+
+
+def pose_rotation(rig, bone_name, axis, degrees):
+    """A pose rotation given in *armature* space, as the quaternion Blender stores.
+
+    Pose rotations live in each bone's own rest frame, whose axes depend on
+    which way the bone points. Converting from armature axes here means a clip
+    can say "swing the thigh forward about Y" for every bone in the same terms,
+    instead of working out each bone's local frame by hand.
+    """
+    rest = rig.data.bones[bone_name].matrix_local.to_3x3()
+    rotation = Matrix.Rotation(math.radians(degrees), 3, axis)
+    return (rest.inverted() @ rotation @ rest).to_quaternion()
+
+
+def clip(rig, name, frames, keys):
+    """Keyframe one action.
+
+    `keys` maps a frame number to `{bone: [(axis, degrees), ...]}`; rotations on
+    one bone are composed in order. Every bone of the rig is keyed on every
+    listed frame, at rest where the frame does not mention it, so a clip never
+    inherits a pose left behind by another.
+
+    Keyed at 30 frames per second, the rate the game bakes at, so a frame in a
+    script is a frame in the game.
+
+    The action is pushed to its own muted NLA track, which is how several actions
+    on one armature all reach the exporter.
+    """
+    scene = bpy.context.scene
+    scene.render.fps = 30
+    scene.render.fps_base = 1.0
+    rig.animation_data_create()
+    action = bpy.data.actions.new(name)
+    rig.animation_data.action = action
+
+    bones = [pb.name for pb in rig.pose.bones]
+    for pb in rig.pose.bones:
+        pb.rotation_mode = "QUATERNION"
+
+    for frame in sorted(keys):
+        for bone in bones:
+            q = Matrix.Identity(3).to_quaternion()
+            for axis, degrees in keys[frame].get(bone, []):
+                q = pose_rotation(rig, bone, axis, degrees) @ q
+            pb = rig.pose.bones[bone]
+            pb.rotation_quaternion = q
+            pb.keyframe_insert("rotation_quaternion", frame=frame)
+
+    action.use_frame_range = True
+    action.frame_start = 0
+    action.frame_end = frames
+
+    track = rig.animation_data.nla_tracks.new()
+    track.name = name
+    track.strips.new(name, 0, action)
+    track.mute = True
+    rig.animation_data.action = None
+    return action
+
+
+def export_rigged(col, content_id, directory=MODELS_OUT):
+    """Export a rigged model: skin, every action as a clip, and custom properties."""
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, f"{content_id}.glb")
+    for obj in bpy.context.scene.objects:
+        obj.select_set(obj.name in col.objects)
+    bpy.ops.export_scene.gltf(
+        filepath=path,
+        export_format="GLB",
+        use_selection=True,
+        export_yup=True,
+        # Not applied: the only modifier on a rigged mesh is its armature, which
+        # the exporter turns into the skin. Applying it would bake a pose instead.
+        export_apply=False,
+        export_attributes=True,
+        export_materials="EXPORT",
+        export_skins=True,
+        export_animations=True,
+        export_animation_mode="ACTIONS",
+        export_extras=True,
+        export_cameras=False,
+        export_lights=False,
+    )
+    return path
+
+
+def set_pose(rig, action, frame):
+    """Show an action at a frame, for a preview render."""
+    rig.animation_data.action = action
+    bpy.context.scene.frame_set(frame)
