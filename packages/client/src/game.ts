@@ -11,6 +11,7 @@ import { FogRenderer } from "./fog-renderer.js";
 import { Hud } from "./hud.js";
 import { CAMERA_DISTANCE, IsoCamera } from "./iso-camera.js";
 import { groundGeometry, type TerrainMaterials } from "./materials.js";
+import type { ModelLibrary } from "./model-library.js";
 import { Minimap } from "./minimap.js";
 import { Selection } from "./selection.js";
 import { TerrainRenderer } from "./terrain-renderer.js";
@@ -58,6 +59,8 @@ export interface GameOptions {
   ai?: Map<number, AiDriver>;
   /** Loaded once at startup; see materials.ts. */
   terrain: TerrainMaterials;
+  /** Every unit and building model, authored or procedural. Loaded once at startup. */
+  models: ModelLibrary;
   /** Rendered in the HUD so a player can read their code back out mid-game. */
   joinCode?: string;
   onStatus?: (status: GameStatus) => void;
@@ -157,7 +160,7 @@ export function startGame(options: GameOptions): RunningGame {
   // could be drawn in this palette. Build placement has its own ghost.
 
   const terrain = new TerrainRenderer(scene, options.terrain);
-  const units = new WorldRenderer(scene, rig.camera);
+  const units = new WorldRenderer(scene, rig.camera, options.models);
   const effects = new Effects(scene);
   const fog = new FogRenderer(scene, mapTiles, localPlayer);
   const selection = new Selection(world, rig, canvas, localPlayer, (command: Command) =>
@@ -165,6 +168,7 @@ export function startGame(options: GameOptions): RunningGame {
   );
   const hud = new Hud(world, localPlayer, selection, (command: Command) =>
     session.submitLocal(command),
+    options.models,
   );
   const groups = new ControlGroups(world, selection, rig, localPlayer);
   // Built after the HUD, because the console owns the bay it mounts into.

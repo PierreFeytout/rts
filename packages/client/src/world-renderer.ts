@@ -10,7 +10,8 @@ import {
 } from "@rts/sim";
 import * as THREE from "three";
 import { bamToThreeY, simToWorld } from "./coords.js";
-import { MODEL_COUNT, buildModels, modelFor, scalesWithFootprint } from "./models.js";
+import type { Model, ModelLibrary } from "./model-library.js";
+import { teamAttributes } from "./model-parts.js";
 import { NEUTRAL_COLOUR, VENT_COLOUR, teamColour } from "./palette.js";
 
 /**
@@ -26,14 +27,21 @@ import { NEUTRAL_COLOUR, VENT_COLOUR, teamColour } from "./palette.js";
  * make rendering affect gameplay and desync peers running at different frame
  * rates.
  *
- * One `InstancedMesh` per *silhouette*, not per unit type. Both races share the
- * same handful of shapes -- see models.ts, which picks a shape from what a unit
- * can do rather than from what it is called -- so a 400-unit battle between two
- * factions is still eight draw calls, and adding a race adds none.
+ * One `InstancedMesh` per *model part*, not per unit. A model is one merged
+ * geometry per material -- see model-parts.ts -- so a 400-unit battle costs a
+ * draw call per part per distinct model on screen, however many units share
+ * it. Parts of one model share a single matrix buffer and a single pair of
+ * team-colour buffers, because they are the same instances.
  */
 
-
-/** Unowned scenery: ore patches and geothermal vents. */
+/** One model's instances: its meshes, and the buffers they share. */
+interface Batch {
+  model: Model;
+  meshes: THREE.InstancedMesh[];
+  team: THREE.InstancedBufferAttribute;
+  shade: THREE.InstancedBufferAttribute;
+  count: number;
+}
 
 
 /** Health bar geometry, in world units. */
@@ -50,10 +58,16 @@ const BAR_HEIGHT = 0.13;
 const MODEL_CAPACITY = 768;
 
 export class WorldRenderer {
-  /** One mesh per silhouette, indexed by the MODEL_* constants. */
-  private readonly models: THREE.InstancedMesh[] = [];
-  /** Live instance count per model this frame. */
-  private readonly counts = new Int32Array(MODEL_COUNT);
+  private readonly scene: THREE.Scene;
+  private readonly library: ModelLibrary;
+  /**
+   * Instances by model key, created the first time a model is needed.
+   *
+   * Lazily rather than up front, because the library holds a model for every
+   * role and every authored file whether or not this match contains a single
+   * unit that uses it.
+   */
+  private readonly batches = new Map<string, Batch>();
 
   private readonly rings: THREE.InstancedMesh;
   private readonly barBack: THREE.InstancedMesh;
@@ -82,22 +96,12 @@ export class WorldRenderer {
   private readonly billboard = new THREE.Quaternion();
   private readonly barRight = new THREE.Vector3();
 
-  constructor(scene: THREE.Scene, camera: THREE.Camera, capacity = 1024) {
+  constructor(scene: THREE.Scene, camera: THREE.Camera, library: ModelLibrary, capacity = 1024) {
+    this.scene = scene;
+    this.library = library;
     camera.updateMatrixWorld();
     this.billboard.copy(camera.quaternion);
     this.barRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-
-    const geometries = buildModels();
-    for (let model = 0; model < MODEL_COUNT; model++) {
-      this.models.push(
-        makeInstanced(
-          scene,
-          geometries[model],
-          new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.25, flatShading: true }),
-          MODEL_CAPACITY,
-        ),
-      );
-    }
 
     // Flat ring drawn just above the ground under selected units.
     const ring = new THREE.RingGeometry(0.44, 0.56, 20);
@@ -156,7 +160,7 @@ export class WorldRenderer {
     const types = world.types;
     const vision = world.vision;
 
-    this.counts.fill(0);
+    for (const batch of this.batches.values()) batch.count = 0;
     let nRings = 0;
     let nBars = 0;
 
@@ -190,12 +194,14 @@ export class WorldRenderer {
         }
       }
 
-      const model = modelFor(type);
-      const mesh = this.models[model];
-      const n = this.counts[model];
+      const batch = this.batch(this.library.forType(type));
+      const n = batch.count;
       if (n < MODEL_CAPACITY) {
+        let light = shade;
         if (type.kind === KIND_RESOURCE) {
-          const scale = type.footprint * 0.62;
+          // Structures, scenery included, are authored in a 1 x 1 box and scaled
+          // to their footprint here -- in exactly one way, for every model.
+          const scale = type.footprint;
           this.scratch.position.set(x, 0, z);
           this.scratch.rotation.set(0, 0, 0);
           this.scratch.scale.set(scale, scale, scale);
@@ -204,16 +210,16 @@ export class WorldRenderer {
           const span = type.footprint;
           // A site rises out of the ground as it is built, which reads as
           // progress without needing a separate progress bar.
-          const progress =
-            e.buildRemaining[i] > 0 ? 1 - e.buildRemaining[i] / Math.max(1, type.buildTime) : 1;
-          const height = scalesWithFootprint(model) ? span * Math.max(0.15, progress) : span;
+          const building = e.buildRemaining[i] > 0;
+          const progress = building ? 1 - e.buildRemaining[i] / Math.max(1, type.buildTime) : 1;
+          const height = span * Math.max(0.15, progress);
           this.scratch.position.set(x, 0, z);
           this.scratch.rotation.set(0, 0, 0);
           this.scratch.scale.set(span * 0.94, height * 0.94, span * 0.94);
           this.colour.setHex(teamColour(owner));
           // Unfinished structures are washed out, so a half-built factory is
           // never mistaken for a working one at a glance.
-          if (e.buildRemaining[i] > 0) this.colour.multiplyScalar(0.5);
+          if (building) light *= 0.5;
         } else {
           this.scratch.position.set(x, 0, z);
           this.scratch.rotation.set(0, bamToThreeY(lerpAngle(pf, e.facing[i], alpha)), 0);
@@ -221,11 +227,12 @@ export class WorldRenderer {
           this.colour.setHex(teamColour(owner));
         }
 
-        this.colour.multiplyScalar(shade);
         this.scratch.updateMatrix();
-        mesh.setMatrixAt(n, this.scratch.matrix);
-        mesh.setColorAt(n, this.colour);
-        this.counts[model] = n + 1;
+        // The matrix buffer is shared by every part, so one write moves them all.
+        batch.meshes[0].setMatrixAt(n, this.scratch.matrix);
+        batch.team.setXYZ(n, this.colour.r, this.colour.g, this.colour.b);
+        batch.shade.setX(n, light);
+        batch.count = n + 1;
       }
 
       if (isMine && nRings < this.rings.instanceMatrix.count) {
@@ -265,12 +272,43 @@ export class WorldRenderer {
       }
     }
 
-    for (let model = 0; model < MODEL_COUNT; model++) {
-      commit(this.models[model], this.counts[model]);
+    for (const batch of this.batches.values()) {
+      for (const mesh of batch.meshes) mesh.count = batch.count;
+      batch.meshes[0].instanceMatrix.needsUpdate = true;
+      batch.team.needsUpdate = true;
+      batch.shade.needsUpdate = true;
     }
     commit(this.rings, nRings);
     commit(this.barBack, nBars);
     commit(this.barFill, nBars);
+  }
+
+  /**
+   * The instances for one model, built the first time it is drawn.
+   *
+   * Geometry is cloned from the library rather than used directly, because the
+   * per-instance buffers are attached to it -- and the portrait studio draws the
+   * same library geometry with buffers of its own.
+   */
+  private batch(model: Model): Batch {
+    const existing = this.batches.get(model.key);
+    if (existing) return existing;
+
+    const { team, shade } = teamAttributes(MODEL_CAPACITY);
+    const meshes: THREE.InstancedMesh[] = [];
+    for (const part of model.parts) {
+      const geometry = part.geometry.clone();
+      geometry.setAttribute("instanceTeam", team);
+      geometry.setAttribute("instanceShade", shade);
+      const mesh = makeInstanced(this.scene, geometry, part.material, MODEL_CAPACITY);
+      // One matrix buffer for all of a model's parts. They are the same units.
+      if (meshes.length > 0) mesh.instanceMatrix = meshes[0].instanceMatrix;
+      meshes.push(mesh);
+    }
+
+    const batch: Batch = { model, meshes, team, shade, count: 0 };
+    this.batches.set(model.key, batch);
+    return batch;
   }
 
   /** World-space position of an entity right now, for picking and UI. */

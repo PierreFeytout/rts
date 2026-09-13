@@ -20,18 +20,11 @@ import pulseUrl from "../../assets/audio/pulse.ogg";
  * separate calls to `play()` on four `<audio>` elements would drift within a
  * minute and turn the percussion into a flam.
  *
- * WHY THE FILES ARE INLINED
- * -------------------------
- * The packaged app loads its renderer from `file://`, and Chromium refuses
- * `fetch` on a file URL -- so the ordinary "fetch the asset, decodeAudioData"
- * path works in the dev server and fails in the shipped game, which is the
- * worst shape a bug can have. Vite is configured to inline `.ogg` as data URLs
- * (see vite.config.ts), and `fetch` on a data URL is allowed everywhere.
- *
- * It costs about two megabytes in the bundle, which is nothing next to a 111 MB
- * installer. The better long-term fix is to serve the renderer over a custom
- * protocol from the Electron main process instead of `file://`; that is a
- * change to the boot path and does not belong in the same commit as the music.
+ * The stems are ordinary emitted assets, fetched and decoded at startup. That
+ * only works in the packaged build because the renderer is served over `app://`
+ * rather than `file://` -- Chromium refuses `fetch` on a file URL -- and for a
+ * while before that existed they were inlined into the bundle as data URLs. See
+ * `serveRenderer` in packages/desktop/src/main.ts.
  */
 
 const STEMS = ["bed", "pulse", "lead", "dread"] as const;
@@ -108,6 +101,11 @@ class MusicPlayer {
         this.decoded.set(name, await ctx.decodeAudioData(bytes));
       }),
     );
+
+    // Informational, and forwarded to the terminal when RTS_VERBOSE is set: the
+    // packaged build has no devtools, and "did the music load" is otherwise a
+    // question only somebody's ears can answer.
+    console.info(`[rts] music: ${this.decoded.size} stems decoded`);
 
     // Autoplay policy: a context created before any user gesture starts
     // suspended, and nothing will sound until it is resumed from one. The menu

@@ -9,6 +9,7 @@ import {
 import { music } from "./audio/music.js";
 import { startGame, type RunningGame } from "./game.js";
 import { loadTerrain } from "./materials.js";
+import { loadModels } from "./model-library.js";
 import { createEmptyWorld } from "./match.js";
 import { Reconnector } from "./reconnect.js";
 import { ReplayControls, downloadReplay } from "./replay-ui.js";
@@ -33,7 +34,13 @@ installStyles();
 //
 // The music does not block the menu: a failure to decode should cost the
 // soundtrack, not the game.
-const terrain = await loadTerrain();
+// Models load alongside the textures for the same reason, and never fail as a
+// whole: a file that will not parse costs that one model, which falls back to
+// its built-in silhouette.
+const [terrain, models] = await Promise.all([
+  loadTerrain(),
+  loadModels((typeId) => defaultContent.contentIdOf(typeId)),
+]);
 void music.load().catch((error: unknown) => console.warn("[rts] no music:", error));
 
 for (;;) {
@@ -53,6 +60,7 @@ async function runMatch(launch: Launch): Promise<void> {
     mapTiles: launch.world.mapTiles,
     ai: launch.ai,
     terrain,
+    models,
   });
 
   const cleanup: Array<() => void> = [];

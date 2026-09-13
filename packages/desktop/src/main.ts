@@ -1,6 +1,6 @@
-import { BrowserWindow, app, ipcMain, shell } from "electron";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { BrowserWindow, app, ipcMain, net, protocol, shell } from "electron";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname, join, normalize, sep } from "node:path";
 import { forwardPort, localAddress, type ForwardResult } from "./port-forward.js";
 import { startRelay, type RunningRelay } from "./relay-server.js";
 
@@ -27,6 +27,52 @@ const DEFAULT_PORT = 47654;
 
 const here = dirname(fileURLToPath(import.meta.url));
 
+/** The built renderer, next to this file whether packaged or not. */
+const CLIENT_ROOT = normalize(join(here, "../../client/dist"));
+
+/**
+ * The renderer is served over `app://` rather than loaded from `file://`.
+ *
+ * Chromium refuses `fetch` on a file URL. Everything the renderer loads through
+ * `fetch` -- decoded audio, and every `.glb` model through three.js's loader --
+ * therefore worked in the dev server and failed in the shipped game, which is
+ * the worst shape a bug can have. The soundtrack worked around it by being
+ * inlined into the bundle as data URLs; models with textures are megabytes each
+ * and cannot.
+ *
+ * A privileged custom scheme is an ordinary origin as far as the page is
+ * concerned: `fetch` works, relative URLs resolve, and nothing in the renderer
+ * needs to know it is not talking to a web server.
+ *
+ * Registered at module load because Electron only accepts scheme privileges
+ * before the app is ready.
+ */
+const SCHEME = "app";
+protocol.registerSchemesAsPrivileged([
+  { scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
+]);
+
+/**
+ * Map `app://rts/<path>` onto a file inside the built renderer, and nothing else.
+ *
+ * The containment check is the whole security story of this handler. Without
+ * it, `app://rts/../../../../somewhere` is a way for anything the renderer
+ * parses -- a replay file, a model -- to read arbitrary files off the player's
+ * disk through a URL.
+ */
+function serveRenderer(request: Request): Promise<Response> | Response {
+  const { pathname } = new URL(request.url);
+  const relative = decodeURIComponent(pathname === "/" ? "/index.html" : pathname);
+  const file = normalize(join(CLIENT_ROOT, relative));
+
+  if (file !== CLIENT_ROOT && !file.startsWith(CLIENT_ROOT + sep)) {
+    return new Response("not found", { status: 404 });
+  }
+  // `net.fetch` on a file URL goes through Electron's own file handler, which
+  // reads straight out of `app.asar` in a packaged build.
+  return net.fetch(pathToFileURL(file).toString());
+}
+
 let window: BrowserWindow | null = null;
 let hosting: RunningRelay | null = null;
 
@@ -45,7 +91,9 @@ function createWindow(): void {
   window = new BrowserWindow({
     width: 1440,
     height: 900,
-    backgroundColor: "#0b0f16",
+    // `void` from the palette, so the window does not flash a colour that is in
+    // no part of the game before the first frame lands.
+    backgroundColor: "#0a0806",
     title: "RTS",
     webPreferences: {
       preload: join(here, "preload.cjs"),
@@ -69,7 +117,7 @@ function createWindow(): void {
     void window.loadURL(devServer);
     window.webContents.openDevTools({ mode: "detach" });
   } else {
-    void window.loadFile(join(here, "../../client/dist/index.html"));
+    void window.loadURL(`${SCHEME}://rts/index.html`);
   }
 
   // A packaged desktop app has no console for the player to check, so the
@@ -84,8 +132,15 @@ function createWindow(): void {
   window.webContents.on("render-process-gone", (_event, details) => {
     console.error(`[rts] renderer stopped: ${details.reason}`);
   });
+  // Warnings as well as errors: a missing model falls back to its procedural
+  // silhouette with a warning rather than failing, and that is exactly the
+  // kind of problem a packaged build otherwise hides completely.
   window.webContents.on("console-message", (event) => {
     if (event.level === "error") console.error(`[rts] renderer: ${event.message}`);
+    else if (event.level === "warning") console.warn(`[rts] renderer: ${event.message}`);
+    // Everything else only on request, so a packaged build can be asked what it
+    // loaded without a devtools window: `RTS_VERBOSE=1 <app>`.
+    else if (process.env.RTS_VERBOSE) console.log(`[rts] renderer: ${event.message}`);
   });
 
   window.on("closed", () => {
@@ -175,6 +230,7 @@ async function smokeTest(): Promise<void> {
 app.whenReady().then(
   () => {
     if (process.env.RTS_SMOKE) return smokeTest();
+    protocol.handle(SCHEME, serveRenderer);
     createWindow();
     return undefined;
   },

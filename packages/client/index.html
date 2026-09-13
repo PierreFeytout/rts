@@ -3,6 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      What the renderer may load, and from where. It parses files it did not
+      write -- replays, models -- so it is worth saying out loud that none of
+      them can pull in a script.
+
+      style-src 'unsafe-inline': the interface sets styles from code throughout.
+      img-src data: blob:      portraits are data URLs; models embed textures,
+                               which three.js loads through blob URLs.
+      connect-src ws: wss:     joining a game is a WebSocket to whatever address
+                               a friend reads out, so it cannot be narrower.
+      connect-src blob:        three.js fetches those embedded textures.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss: blob:; object-src 'none'; base-uri 'none'"
+    />
     <title>RTS</title>
     <style>
       :root {

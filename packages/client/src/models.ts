@@ -10,15 +10,14 @@ import {
 } from "@rts/sim";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { TEAM_MASK, applyTeamMask, type ModelPart, type RoleName, ROLE_NAMES } from "./model-parts.js";
 
 /**
- * Unit and building silhouettes.
+ * The built-in silhouettes: what anything without an authored model is drawn as.
  *
- * Built from primitives at load rather than loaded from `.glb`. Two reasons,
- * and the first is the honest one: there are no modelled assets yet, and a
- * procedural mesh is a far better placeholder than a box. The second is that it
- * keeps the asset pipeline out of the critical path -- `modelFor` is the only
- * seam a real `.glb` loader has to fill, and it can do so one unit at a time.
+ * Authored `.glb` models replace these one type at a time -- see
+ * model-library.ts for the lookup and assets/models/README.md for the rules --
+ * and nothing is ever *required* to have one. These are the floor.
  *
  * **Models are chosen by what a unit IS, not by what it is called.** A
  * harvester gets the harvester silhouette because it has the `gather`
@@ -45,6 +44,16 @@ export const MODEL_EXTRACTOR = 8;
 export const MODEL_SUPPORT = 9;
 export const MODEL_CRYSTAL = 10;
 export const MODEL_COUNT = 11;
+
+/** The role's name, which is also how an authored model is filed for it. */
+export function roleName(model: number): RoleName {
+  return ROLE_NAMES[model];
+}
+
+/** Whether a role stands in for a structure, which is authored in a unit box. */
+export function isStructureRole(model: number): boolean {
+  return model >= MODEL_HQ;
+}
 
 /** Weapon range, in tiles, above which a unit reads as "ranged" rather than a brawler. */
 const RANGED_TILES = 3;
@@ -88,24 +97,22 @@ export function modelFor(type: EntityType): number {
   return MODEL_BRAWLER;
 }
 
-/** True for models whose height should rise with construction progress. */
-export function scalesWithFootprint(model: number): boolean {
-  return (
-    model === MODEL_HQ ||
-    model === MODEL_FACTORY ||
-    model === MODEL_TURRET ||
-    model === MODEL_EXTRACTOR ||
-    model === MODEL_SUPPORT
-  );
-}
-
 /**
- * Build every silhouette once.
+ * Build every silhouette once, as parts ready for the team shader.
  *
- * Geometries are shared by all instances of a model, so this runs a single time
- * per match and its cost is irrelevant.
+ * Indexed by the MODEL_* constants. Geometries and materials are shared by every
+ * instance of a model and by the portrait studio, so this runs once per process.
  */
-export function buildModels(): THREE.BufferGeometry[] {
+export function buildModels(): ModelPart[][] {
+  const material = new THREE.MeshStandardMaterial({
+    name: "procedural",
+    roughness: 0.62,
+    metalness: 0.35,
+    flatShading: true,
+    vertexColors: true,
+  });
+  applyTeamMask(material);
+
   const models = new Array<THREE.BufferGeometry>(MODEL_COUNT);
   models[MODEL_WORKER] = worker();
   models[MODEL_BRAWLER] = brawler();
@@ -118,8 +125,24 @@ export function buildModels(): THREE.BufferGeometry[] {
   models[MODEL_EXTRACTOR] = extractor();
   models[MODEL_SUPPORT] = support();
   models[MODEL_CRYSTAL] = crystal();
-  return models;
+  return models.map((geometry) => [{ geometry, material }]);
 }
+
+/**
+ * How a piece of a silhouette is painted.
+ *
+ * Linear values, which is what three.js assumes vertex colours are. `hull` is
+ * warm iron from the palette, lifted enough to read under the low key light;
+ * `dark` is for barrels, vents and anything that should read as a hole; `team`
+ * is the 45% grey that the team shader turns into exactly the owner's colour.
+ */
+type Paint = "hull" | "dark" | "team";
+
+const PAINT: Record<Paint, { colour: [number, number, number]; mask: number }> = {
+  hull: { colour: [0.144, 0.11, 0.08], mask: 0 },
+  dark: { colour: [0.027, 0.022, 0.019], mask: 0 },
+  team: { colour: [0.45, 0.45, 0.45], mask: 1 },
+};
 
 // ---------------------------------------------------------------------------
 // Units. Roughly 0.6-0.9 world units long, so they read at the default zoom
@@ -140,7 +163,7 @@ function worker(): THREE.BufferGeometry {
   const podR = podL.clone();
   podR.translate(0, 0, -0.48);
 
-  return merge([body, nose, podL, podR]);
+  return merge([[body, "hull"], [nose, "team"], [podL, "team"], [podR, "team"]]);
 }
 
 /** Short, wide and forward-leaning: something that wants to be close. */
@@ -152,7 +175,7 @@ function brawler(): THREE.BufferGeometry {
   head.translate(0.26, 0.4, 0);
   const skirt = new THREE.CylinderGeometry(0.3, 0.32, 0.1, 6);
   skirt.translate(0, 0.06, 0);
-  return merge([torso, head, skirt]);
+  return merge([[torso, "hull"], [head, "team"], [skirt, "dark"]]);
 }
 
 /** Slim, with a long barrel. Its reach is the thing worth reading at a glance. */
@@ -164,7 +187,7 @@ function ranged(): THREE.BufferGeometry {
   barrel.translate(0.3, 0.34, 0);
   const base = new THREE.CylinderGeometry(0.22, 0.24, 0.09, 5);
   base.translate(0, 0.05, 0);
-  return merge([body, barrel, base]);
+  return merge([[body, "team"], [barrel, "dark"], [base, "hull"]]);
 }
 
 /** Low, swept and outriggered. Reads as speed rather than firepower. */
@@ -179,7 +202,7 @@ function scout(): THREE.BufferGeometry {
   finR.translate(0, 0, -0.44);
   const vane = new THREE.BoxGeometry(0.16, 0.22, 0.04);
   vane.translate(-0.28, 0.32, 0);
-  return merge([hull, finL, finR, vane]);
+  return merge([[hull, "hull"], [finL, "team"], [finR, "team"], [vane, "team"]]);
 }
 
 /** Wide hull, raised turret, thick gun. Unmistakably the expensive one. */
@@ -188,13 +211,17 @@ function heavy(): THREE.BufferGeometry {
   hull.translate(0, 0.16, 0);
   const glacis = new THREE.ConeGeometry(0.3, 0.3, 4);
   glacis.rotateZ(-Math.PI / 2);
+  // Squashed to the hull's height. At full radius the plate hung 0.14 below
+  // the ground, and every heavy unit in the game had been sinking into the
+  // terrain unnoticed until the model contract was checked against it.
+  glacis.scale(1, 0.5, 1);
   glacis.translate(0.5, 0.16, 0);
   const turretBlock = new THREE.BoxGeometry(0.4, 0.2, 0.4);
   turretBlock.translate(-0.04, 0.36, 0);
   const gun = new THREE.CylinderGeometry(0.07, 0.08, 0.56, 6);
   gun.rotateZ(-Math.PI / 2);
   gun.translate(0.38, 0.38, 0);
-  return merge([hull, glacis, turretBlock, gun]);
+  return merge([[hull, "hull"], [glacis, "hull"], [turretBlock, "team"], [gun, "dark"]]);
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +239,7 @@ function hq(): THREE.BufferGeometry {
   cap.translate(0, 0.75, 0);
   const mast = new THREE.CylinderGeometry(0.04, 0.04, 0.36, 4);
   mast.translate(0, 1.03, 0);
-  return merge([plinth, mid, cap, mast]);
+  return merge([[plinth, "hull"], [mid, "team"], [cap, "hull"], [mast, "dark"]]);
 }
 
 /** A long hall with a vented roof. Reads as industry rather than command. */
@@ -225,7 +252,7 @@ function factory(): THREE.BufferGeometry {
   roof.translate(0, 0.44, 0);
   const stack = new THREE.CylinderGeometry(0.07, 0.09, 0.34, 5);
   stack.translate(-0.3, 0.72, 0.26);
-  return merge([hall, roof, stack]);
+  return merge([[hall, "hull"], [roof, "team"], [stack, "dark"]]);
 }
 
 /** Small base, tall pivot, gun. Obviously a weapon and obviously static. */
@@ -238,8 +265,10 @@ function turret(): THREE.BufferGeometry {
   head.translate(0, 0.62, 0);
   const gun = new THREE.CylinderGeometry(0.06, 0.06, 0.5, 5);
   gun.rotateZ(-Math.PI / 2);
-  gun.translate(0.3, 0.66, 0);
-  return merge([base, post, head, gun]);
+  // Kept inside the footprint. It used to reach past the edge, which put the
+  // barrel through whatever was built on the next tile.
+  gun.translate(0.26, 0.66, 0);
+  return merge([[base, "hull"], [post, "hull"], [head, "team"], [gun, "dark"]]);
 }
 
 /** A capped drum with an offtake pipe: obviously plumbing, obviously on a vent. */
@@ -252,8 +281,9 @@ function extractor(): THREE.BufferGeometry {
   cap.translate(0, 0.6, 0);
   const pipe = new THREE.CylinderGeometry(0.09, 0.09, 0.5, 6);
   pipe.rotateZ(Math.PI / 2);
-  pipe.translate(0.3, 0.24, 0.26);
-  return merge([pad, drum, cap, pipe]);
+  // Inside the footprint, for the same reason as the turret's barrel.
+  pipe.translate(0.24, 0.24, 0.26);
+  return merge([[pad, "dark"], [drum, "hull"], [cap, "team"], [pipe, "hull"]]);
 }
 
 /** Low, wide and unremarkable. Support buildings should not draw the eye. */
@@ -264,21 +294,30 @@ function support(): THREE.BufferGeometry {
   fin.translate(0.16, 0.4, 0);
   const light = new THREE.OctahedronGeometry(0.14, 0);
   light.translate(-0.26, 0.44, 0);
-  return merge([slab, fin, light]);
+  return merge([[slab, "hull"], [fin, "team"], [light, "team"]]);
 }
 
 /** A cluster of shards rather than one crystal, so patches read as terrain. */
 function crystal(): THREE.BufferGeometry {
   const main = new THREE.OctahedronGeometry(0.42, 0);
   main.scale(1, 1.5, 1);
-  main.translate(0, 0.5, 0);
+  // Its lower point sat 0.13 below the ground, and the model contract says a
+  // base rests on y = 0 -- the rule an artist will be held to has to hold for
+  // the placeholder too, or it is not a rule.
+  main.translate(0, 0.63, 0);
   const a = new THREE.OctahedronGeometry(0.24, 0);
   a.scale(1, 1.4, 1);
   a.translate(0.34, 0.28, 0.18);
   const b = new THREE.OctahedronGeometry(0.19, 0);
   b.scale(1, 1.3, 1);
   b.translate(-0.3, 0.22, -0.24);
-  return merge([main, a, b]);
+  // Painted all over: scenery's "team" colour is neutral or vent, and that colour
+  // is the whole of how the two are told apart. The scale that used to be
+  // applied at draw time lives here now, because the renderer scales every
+  // structure by its footprint in exactly one way.
+  const merged = merge([[main, "team"], [a, "team"], [b, "team"]]);
+  merged.scale(0.62, 0.62, 0.62);
+  return merged;
 }
 
 /**
@@ -288,7 +327,8 @@ function crystal(): THREE.BufferGeometry {
  * drawn as four hundred three-part groups would be twelve hundred draw calls,
  * where four hundred merged instances are one.
  */
-function merge(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+function merge(painted: Array<[THREE.BufferGeometry, Paint]>): THREE.BufferGeometry {
+  const parts = painted.map(([geometry]) => geometry);
   // Everything is un-indexed first. `mergeGeometries` requires that all inputs
   // either have an index buffer or none do, and three.js primitives disagree:
   // Box, Cylinder, Cone and Sphere are indexed, while the polyhedra
@@ -299,7 +339,21 @@ function merge(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   // Normalising here rather than at each call site keeps `merge` total: adding
   // a part should not require knowing which primitives three.js indexes.
   // Un-indexed also suits the flat shading these models are drawn with.
-  const flat = parts.map((part) => (part.index ? part.toNonIndexed() : part));
+  const flat = painted.map(([part, paint]) => {
+    const geometry = part.index ? part.toNonIndexed() : part;
+    // Only the attributes every authored model also carries, so a procedural
+    // part and a loaded one are interchangeable to everything downstream.
+    for (const name of Object.keys(geometry.attributes)) {
+      if (!["position", "normal", "uv"].includes(name)) geometry.deleteAttribute(name);
+    }
+    const count = geometry.getAttribute("position").count;
+    const { colour, mask } = PAINT[paint];
+    const colours = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) colours.set(colour, i * 3);
+    geometry.setAttribute("color", new THREE.BufferAttribute(colours, 3));
+    geometry.setAttribute(TEAM_MASK, new THREE.BufferAttribute(new Float32Array(count).fill(mask), 1));
+    return geometry;
+  });
   const merged = mergeGeometries(flat, false);
   for (const part of parts) part.dispose();
   for (const part of flat) if (!parts.includes(part)) part.dispose();

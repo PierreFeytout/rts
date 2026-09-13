@@ -15,6 +15,7 @@ import {
   type EntityType,
   type World,
 } from "@rts/sim";
+import type { ModelLibrary } from "./model-library.js";
 import { css, teamColour } from "./palette.js";
 import { iconFor, portraitFor } from "./portrait.js";
 import type { Selection } from "./selection.js";
@@ -67,6 +68,8 @@ export class Hud {
   private readonly localPlayer: number;
   private readonly emit: (command: Command) => void;
   private readonly selection: Selection;
+  /** What portraits and command icons are rendered from. */
+  private readonly models: ModelLibrary;
 
   private readonly console: HTMLDivElement;
   private readonly resources: HTMLDivElement;
@@ -81,8 +84,15 @@ export class Hud {
   private cardKey = "";
   private toastUntil = 0;
 
-  constructor(world: World, localPlayer: number, selection: Selection, emit: (c: Command) => void) {
+  constructor(
+    world: World,
+    localPlayer: number,
+    selection: Selection,
+    emit: (c: Command) => void,
+    models: ModelLibrary,
+  ) {
     installStyles();
+    this.models = models;
     this.world = world;
     this.localPlayer = localPlayer;
     this.selection = selection;
@@ -270,7 +280,7 @@ export class Hud {
       const type = this.world.types.get(primary);
       const bust = document.createElement("div");
       bust.className = "rts-bust";
-      bust.style.backgroundImage = `url(${portraitFor(type, teamColour(owner))})`;
+      bust.style.backgroundImage = `url(${portraitFor(this.models, type, teamColour(owner))})`;
       this.selected.appendChild(bust);
     }
 
@@ -373,7 +383,7 @@ export class Hud {
     button.title = action.label + (action.cost ? ` — ${action.cost}` : "");
 
     if (action.type) {
-      button.style.backgroundImage = `url(${iconFor(action.type, teamColour(this.localPlayer))})`;
+      button.style.backgroundImage = `url(${iconFor(this.models, action.type, teamColour(this.localPlayer))})`;
     }
     // Name on every slot, not just the ones without an icon. The silhouettes
     // are procedural and several buildings read almost identically at 40px, so
