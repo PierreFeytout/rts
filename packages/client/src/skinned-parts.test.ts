@@ -263,6 +263,19 @@ describe("frameAt", () => {
   });
 });
 
+describe("structure clips", () => {
+  it("never loop a construction or a release", () => {
+    const r = rig();
+    const build = r.clip.clone();
+    build.name = "build";
+    const release = r.clip.clone();
+    release.name = "release";
+    const bake = bakeAnimations(r.root, r.mesh, [build, release]);
+    expect(bake.clips.get("build")!.loop).toBe(false);
+    expect(bake.clips.get("release")!.loop).toBe(false);
+  });
+});
+
 describe("toSkinnedParts", () => {
   it("keeps the skin weights and moves geometry into bind-pose world space", () => {
     const r = rig();

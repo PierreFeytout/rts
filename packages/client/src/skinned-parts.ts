@@ -39,9 +39,11 @@ export const BAKE_FPS = 30;
  * Clips that play once and hold their last pose, rather than looping.
  *
  * By name, because glTF has no loop flag -- looping is a playback decision, and
- * in this game the decision follows from what the clip is.
+ * in this game the decision follows from what the clip is. A structure's
+ * `build` is scrubbed by construction progress, and its `release` plays each
+ * time something it made comes out; neither wraps round to its start.
  */
-const ONE_SHOT = new Set(["fire", "attack", "death", "die"]);
+const ONE_SHOT = new Set(["fire", "attack", "death", "die", "build", "release"]);
 
 export interface BakedClip {
   readonly name: string;

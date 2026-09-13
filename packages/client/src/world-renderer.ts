@@ -1,5 +1,6 @@
 import {
   EV_SHOT,
+  EV_UNIT_TRAINED,
   KIND_BUILDING,
   KIND_RESOURCE,
   MAX_ENTITIES,
@@ -50,10 +51,15 @@ interface Batch {
   count: number;
 }
 
-/** Which clip a unit wants. Resolved to a real clip per model; see `clipFor`. */
+/** Which clip an entity wants. Resolved to a real clip per model; see `clipFor`. */
 const IDLE = 0;
 const WALK = 1;
 const FIRE = 2;
+/** Structures: working through a queue, letting something out, going up. */
+const PRODUCE = 3;
+const RELEASE = 4;
+const BUILD = 5;
+const CLIP_NAMES = ["idle", "walk", "fire", "produce", "release", "build"];
 
 /**
  * Seconds to blend from one clip into the next.
@@ -73,9 +79,8 @@ const BLEND_SECONDS = 0.18;
  * the model, never a reason for a unit to vanish or throw.
  */
 function clipFor(bake: AnimationBake, wanted: number): BakedClip {
-  const name = wanted === FIRE ? "fire" : wanted === WALK ? "walk" : "idle";
   return (
-    bake.clips.get(name) ??
+    bake.clips.get(CLIP_NAMES[wanted]) ??
     bake.clips.get("idle") ??
     bake.clips.get("rest") ??
     // Baking always produces at least one clip, so this cannot come back empty.
@@ -141,6 +146,8 @@ export class WorldRenderer {
   private readonly animBlend = new Float32Array(MAX_ENTITIES);
   /** When each entity last fired, in seconds on the frame clock. */
   private readonly lastShot = new Float64Array(MAX_ENTITIES).fill(-Infinity);
+  /** When each structure last let out something it made, on the same clock. */
+  private readonly lastRelease = new Float64Array(MAX_ENTITIES).fill(-Infinity);
   private lastFrame = -1;
   /**
    * Camera orientation, baked into every health bar instance.
@@ -270,18 +277,25 @@ export class WorldRenderer {
           this.colour.setHex(type.resourceAmount > 0 ? NEUTRAL_COLOUR : VENT_COLOUR);
         } else if (type.kind === KIND_BUILDING) {
           const span = type.footprint;
-          // A site rises out of the ground as it is built, which reads as
-          // progress without needing a separate progress bar.
           const building = e.buildRemaining[i] > 0;
           const progress = building ? 1 - e.buildRemaining[i] / Math.max(1, type.buildTime) : 1;
-          const height = span * Math.max(0.15, progress);
+          // A structure with a construction clip shows its own construction, at
+          // full size. Anything else rises out of the ground as it is built,
+          // which reads as progress without needing a separate progress bar.
+          const animation = batch.model.animation;
+          const staged = animation !== undefined && animation.clips.has("build");
+          const height = staged ? span : span * Math.max(0.15, progress);
           this.scratch.position.set(x, 0, z);
           this.scratch.rotation.set(0, 0, 0);
           this.scratch.scale.set(span * 0.94, height * 0.94, span * 0.94);
           this.colour.setHex(teamColour(owner));
           // Unfinished structures are washed out, so a half-built factory is
-          // never mistaken for a working one at a glance.
-          if (building) light *= 0.5;
+          // never mistaken for a working one at a glance. Less so when the
+          // construction is animated: the animation already says it.
+          if (building) light *= staged ? 0.75 : 0.5;
+          if (animation) {
+            this.animateStructure(i, e.idAt(i), animation, building ? progress : -1, e.queueLen[i] > 0, dt, now);
+          }
         } else {
           this.colour.setHex(teamColour(owner));
         }
@@ -292,6 +306,17 @@ export class WorldRenderer {
           batch.meshes[0].setMatrixAt(n, this.scratch.matrix);
           batch.team.setXYZ(n, this.colour.r, this.colour.g, this.colour.b);
           batch.shade.setX(n, light);
+          const animation = batch.model.animation;
+          if (batch.animation && animation) {
+            const clip = clipFor(animation, this.animClip[i]);
+            const prev = clipFor(animation, this.animPrev[i]);
+            batch.animation.setXYZ(
+              n,
+              frameAt(clip, this.animTime[i]),
+              frameAt(prev, this.animPrevTime[i]),
+              this.animBlend[i],
+            );
+          }
           batch.count = n + 1;
         } else {
           // How far the unit moved this tick, which picks and paces its walk.
@@ -351,7 +376,8 @@ export class WorldRenderer {
   }
 
   /**
-   * Read one tick's shots, so a unit that fired plays its firing clip.
+   * Read one tick's shots and releases, so a unit that fired plays its firing
+   * clip and a structure that finished a unit lets it out.
    *
    * Call from the session's after-tick hook, while `world.events` still holds
    * the tick -- the same place effects and the HUD read it.
@@ -360,7 +386,59 @@ export class WorldRenderer {
     const now = performance.now() / 1000;
     for (const event of world.events.all) {
       if (event.kind === EV_SHOT) this.lastShot[entityIndex(event.shooter)] = now;
+      else if (event.kind === EV_UNIT_TRAINED) this.lastRelease[entityIndex(event.from)] = now;
     }
+  }
+
+  /**
+   * Decide which clip a structure should be playing, and move it along.
+   *
+   * Construction is not played but scrubbed: `progress` (0 to 1 while the site
+   * is going up, negative once it stands) picks the frame, so a half-built site
+   * is half way through its `build` clip however long it has taken and however
+   * many workers are on it. Once it stands, letting out something it made beats
+   * working, and working -- anything in its queue -- beats standing idle.
+   */
+  private animateStructure(
+    i: number,
+    id: EntityId,
+    bake: AnimationBake,
+    progress: number,
+    producing: boolean,
+    dt: number,
+    now: number,
+  ): void {
+    if (this.animOwner[i] !== id) {
+      // Offset into idle, so a row of identical structures does not blink in unison.
+      this.animOwner[i] = id;
+      this.animClip[i] = IDLE;
+      this.animPrev[i] = IDLE;
+      this.animTime[i] = ((i * 0.6180339) % 1) * 2;
+      this.animPrevTime[i] = 0;
+      this.animBlend[i] = 0;
+      this.lastRelease[i] = -Infinity;
+    }
+
+    const build = bake.clips.get("build");
+    const release = bake.clips.get("release");
+    const releasing = release !== undefined && now - this.lastRelease[i] < release.duration;
+    const wanted = progress >= 0 && build ? BUILD : releasing ? RELEASE : producing && bake.clips.has("produce") ? PRODUCE : IDLE;
+
+    if (wanted !== this.animClip[i]) {
+      this.animPrev[i] = this.animClip[i];
+      this.animPrevTime[i] = this.animTime[i];
+      this.animBlend[i] = 1;
+      this.animClip[i] = wanted;
+      if (wanted === RELEASE) this.animTime[i] = 0;
+    } else if (wanted === RELEASE && now - this.lastRelease[i] < this.animTime[i]) {
+      // Another unit out before the doors finished closing: open them again.
+      this.animTime[i] = 0;
+    }
+
+    if (wanted === BUILD) this.animTime[i] = progress * build!.duration;
+    else this.animTime[i] += dt;
+    this.animPrevTime[i] += dt;
+    this.animBlend[i] = Math.max(0, this.animBlend[i] - dt / BLEND_SECONDS);
   }
 
   /**

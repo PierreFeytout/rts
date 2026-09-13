@@ -24,6 +24,7 @@ features per tile: a figure half a tile tall wants scales in the hundreds.
 
 import math
 import os
+import time
 
 import bpy
 
@@ -34,9 +35,21 @@ import bpy
 
 class Graph:
     """Wraps one material's node tree. Inputs are set by name or index; a value
-    that is a socket is linked, anything else is a default value."""
+    that is a socket is linked, anything else is a default value.
 
-    def __init__(self, name):
+    `scale` is how many times larger than a figure the thing being textured is.
+    Every noise scale and distance in a surface is written for the Conscript; a
+    Bastion's plates are several times the size of a pauldron, so its rust
+    patches, chipped edges and crevice grime have to be several times larger
+    too, or they shrink to a fizz nobody can see from the game camera.
+
+    `ash` turns on settled ash (see `settle`): buildings want it, figures --
+    who move, and shed it -- do not.
+    """
+
+    def __init__(self, name, scale=1.0, ash=0.0):
+        self.scale = scale
+        self.ash = ash
         self.material = bpy.data.materials.new(name)
         self.material.use_nodes = True
         self.nt = self.material.node_tree
@@ -74,26 +87,26 @@ class Graph:
     def noise(self, scale, detail=4.0, roughness=0.55, distortion=0.0, vector=None):
         return self.node("ShaderNodeTexNoise", {
             "Vector": vector if vector is not None else self.coords(),
-            "Scale": scale, "Detail": detail, "Roughness": roughness, "Distortion": distortion,
+            "Scale": scale / self.scale, "Detail": detail, "Roughness": roughness, "Distortion": distortion,
         }).outputs["Factor"]
 
     def cracks(self, scale, width):
         """Thin lines along the cells of a Voronoi pattern, 1 on the line."""
-        edge = self.node("ShaderNodeTexVoronoi", {"Vector": self.coords(), "Scale": scale},
+        edge = self.node("ShaderNodeTexVoronoi", {"Vector": self.coords(), "Scale": scale / self.scale},
                          feature="DISTANCE_TO_EDGE").outputs["Distance"]
         return self.band(edge, width, 0.0)
 
     def weave(self, scale):
         """Canvas: two perpendicular sets of bands, multiplied."""
-        a = self.node("ShaderNodeTexWave", {"Vector": self.coords(), "Scale": scale, "Distortion": 0.6},
+        a = self.node("ShaderNodeTexWave", {"Vector": self.coords(), "Scale": scale / self.scale, "Distortion": 0.6},
                       wave_type="BANDS", bands_direction="X").outputs["Factor"]
-        b = self.node("ShaderNodeTexWave", {"Vector": self.coords(), "Scale": scale, "Distortion": 0.6},
+        b = self.node("ShaderNodeTexWave", {"Vector": self.coords(), "Scale": scale / self.scale, "Distortion": 0.6},
                       wave_type="BANDS", bands_direction="Z").outputs["Factor"]
         return self.math("MULTIPLY", a, b)
 
     def occlusion(self, distance, inside=False):
         """Ambient occlusion: 0 in creases. With `inside`, 0 on convex edges."""
-        n = self.node("ShaderNodeAmbientOcclusion", {"Distance": distance}, inside=inside, samples=16)
+        n = self.node("ShaderNodeAmbientOcclusion", {"Distance": distance * self.scale}, inside=inside, samples=16)
         return n.outputs["AO"]
 
     def edges(self, distance):
@@ -103,7 +116,40 @@ class Graph:
     def height_from_z(self, low, high):
         """0 at `low`, 1 at `high`, object space: grime rising from the ground."""
         z = self.node("ShaderNodeSeparateXYZ", {"Vector": self.coords()}).outputs["Z"]
-        return self.band(z, low, high)
+        return self.band(z, low * self.scale, high * self.scale)
+
+    def stripes(self, scale):
+        """Diagonal bands, 1 on a stripe: hazard marking, on a face of any facing."""
+        wave = self.node("ShaderNodeTexWave", {"Vector": self.coords(), "Scale": scale / self.scale},
+                         wave_type="BANDS", bands_direction="DIAGONAL").outputs["Factor"]
+        return self.band(wave, 0.46, 0.54)
+
+    def facing_up(self, start=0.5, end=0.92):
+        """1 on faces that point at the sky, 0 on walls and undersides."""
+        normal = self.node("ShaderNodeNewGeometry").outputs["Normal"]
+        z = self.node("ShaderNodeSeparateXYZ", {"Vector": normal}).outputs["Z"]
+        return self.band(z, start, end)
+
+    def settle(self, colour, roughness, height):
+        """Ash, where ash would lie.
+
+        UNIVERSE.md: ash collects in every horizontal crevice and nowhere
+        vertical, and that one rule does more for the look than any amount of
+        detail. So it is gated on the face pointing up, drifted by broad noise,
+        and packed thickest where the surface is occluded -- a ledge against a
+        wall, the floor of a trough.
+        """
+        drifts = self.band(self.noise(12, detail=5, distortion=0.4), 0.3, 0.75)
+        crevices = self.math("SUBTRACT", 1.0, self.occlusion(0.02))
+        cover = self.math("MULTIPLY", self.facing_up(),
+                          self.math("ADD", self.math("MULTIPLY", drifts, 0.75), crevices))
+        cover = self.math("MULTIPLY", cover, self.ash)
+        ash = self.mix(self.noise(350, detail=2), (0.1, 0.075, 0.055), (0.16, 0.135, 0.11))
+        colour = self.mix(cover, colour, ash)
+        roughness = self.mixf(cover, roughness, 0.95)
+        lifted = self.math("MULTIPLY", cover, 0.4)
+        height = lifted if height is None else self.math("ADD", height, lifted)
+        return colour, roughness, height
 
     # -- arithmetic -----------------------------------------------------------
 
@@ -136,11 +182,13 @@ class Graph:
     # -- output ---------------------------------------------------------------
 
     def finish(self, colour, roughness, height=None, strength=0.3, distance=0.002, metallic=0.0):
+        if self.ash > 0:
+            colour, roughness, height = self.settle(colour, roughness, height)
         self.set(self.bsdf.inputs["Base Color"], rgba(colour))
         self.set(self.bsdf.inputs["Roughness"], roughness)
         self.set(self.bsdf.inputs["Metallic"], metallic)
         if height is not None:
-            bump = self.node("ShaderNodeBump", {"Height": height, "Strength": strength, "Distance": distance})
+            bump = self.node("ShaderNodeBump", {"Height": height, "Strength": strength, "Distance": distance * self.scale})
             self.set(self.bsdf.inputs["Normal"], bump.outputs["Normal"])
         return self.material
 
@@ -155,9 +203,9 @@ def rgba(value):
 # The Directorate's surfaces
 # ---------------------------------------------------------------------------
 
-def canvas(name="canvas", colour=(0.2, 0.17, 0.13)):
+def canvas(name="canvas", colour=(0.2, 0.17, 0.13), **world):
     """Heavy work canvas: a visible weave, ash ground into it low down, stains."""
-    g = Graph(name)
+    g = Graph(name, **world)
     weave = g.weave(900)
     stains = g.noise(90, detail=6)
     ground_in = g.math("MULTIPLY", g.math("SUBTRACT", 1.0, g.height_from_z(0.0, 0.2)), 0.6)
@@ -171,9 +219,9 @@ def canvas(name="canvas", colour=(0.2, 0.17, 0.13)):
     return g.finish(c, g.mixf(stains, 0.92, 0.75), height, strength=0.25, distance=0.0008)
 
 
-def leather(name="leather", colour=(0.16, 0.09, 0.045)):
+def leather(name="leather", colour=(0.16, 0.09, 0.045), **world):
     """Oiled leather: creases, scuffed pale on the edges."""
-    g = Graph(name)
+    g = Graph(name, **world)
     creases = g.noise(260, detail=8, roughness=0.7, distortion=0.4)
     scuffs = g.math("MULTIPLY", g.edges(0.004), g.band(g.noise(160), 0.35, 0.6))
     crease = g.math("SUBTRACT", 1.0, g.occlusion(0.005))
@@ -184,9 +232,9 @@ def leather(name="leather", colour=(0.16, 0.09, 0.045)):
     return g.finish(c, g.mixf(scuffs, 0.5, 0.8), creases, strength=0.35, distance=0.001)
 
 
-def ceramic(name="ceramic", colour=(0.62, 0.55, 0.42)):
+def ceramic(name="ceramic", colour=(0.62, 0.55, 0.42), **world):
     """Heat ceramic, bone-coloured: hairline cracks, chipped edges, soot."""
-    g = Graph(name)
+    g = Graph(name, **world)
     cracks = g.cracks(140, 0.012)
     chips = g.math("MULTIPLY", g.edges(0.006), g.band(g.noise(120, detail=3), 0.45, 0.55))
     soot = g.math("MULTIPLY", g.band(g.noise(40, detail=5), 0.55, 0.85), 0.5)
@@ -202,9 +250,9 @@ def ceramic(name="ceramic", colour=(0.62, 0.55, 0.42)):
     return g.finish(c, g.mixf(soot, 0.62, 0.9), height, strength=0.5, distance=0.0015)
 
 
-def iron(name="iron", colour=(0.3, 0.25, 0.2)):
+def iron(name="iron", colour=(0.3, 0.25, 0.2), **world):
     """Worked iron: rust blooming in patches and running down, polished edges."""
-    g = Graph(name)
+    g = Graph(name, **world)
     rust = g.band(g.noise(70, detail=6, distortion=0.3), 0.5, 0.72)
     runs = g.band(g.noise(40, vector=g.stretched(8, 8, 1)), 0.55, 0.8)
     polish = g.math("MULTIPLY", g.edges(0.004), 0.9)
@@ -219,13 +267,13 @@ def iron(name="iron", colour=(0.3, 0.25, 0.2)):
     return g.finish(c, roughness, g.math("ADD", pitting, rust), strength=0.3, distance=0.0008, metallic=0.3)
 
 
-def paint(name="paint"):
+def paint(name="paint", **world):
     """Team paint over iron: 45% grey, chipped through at edges, scratched, dusty.
 
     The chips are iron-coloured and so much darker, which the game turns into
     darker paint -- close enough to bare metal at the size anything is seen.
     """
-    g = Graph(name)
+    g = Graph(name, **world)
     chips = g.math("MULTIPLY", g.edges(0.005), g.band(g.noise(140, detail=4), 0.4, 0.55))
     scratches = g.band(g.noise(60, detail=2, vector=g.stretched(1, 1, 25)), 0.62, 0.66)
     dust = g.band(g.noise(35, detail=5), 0.5, 0.85)
@@ -238,22 +286,119 @@ def paint(name="paint"):
     return g.finish(c, g.mixf(chips, 0.6, 0.45), height, strength=0.4, distance=0.001)
 
 
-def rubber(name="rubber"):
+def rubber(name="rubber", **world):
     """Hoses, soles, seals: near black, matt, a little ash in the grain."""
-    g = Graph(name)
+    g = Graph(name, **world)
     grain = g.noise(400, detail=3)
     c = g.mix(g.math("MULTIPLY", grain, 0.5), (0.045, 0.04, 0.036), (0.09, 0.085, 0.078))
     return g.finish(c, 0.88, grain, strength=0.15, distance=0.0005)
 
 
-def directorate_surfaces():
+def directorate_surfaces(**world):
+    """The figure surfaces. A building passes `scale` and `ash`; see Graph."""
     return {
-        "canvas": canvas(),
-        "leather": leather(),
-        "ceramic": ceramic(),
-        "iron": iron(),
-        "paint": paint(),
-        "rubber": rubber(),
+        "canvas": canvas(**world),
+        "leather": leather(**world),
+        "ceramic": ceramic(**world),
+        "iron": iron(**world),
+        "paint": paint(**world),
+        "rubber": rubber(**world),
+    }
+
+
+# ---------------------------------------------------------------------------
+# The Directorate's structures. UNIVERSE.md names these as the surfaces that
+# arrive with the buildings: rockcrete for the apron, plate for the hull, grate
+# for the decking. Hazard marking is the Directorate's, worn down to ghosts.
+# ---------------------------------------------------------------------------
+
+def plate(name="plate", colour=(0.25, 0.2, 0.155), **world):
+    """Hull armour cut off something larger and welded back up.
+
+    Nothing about it is new: neighbouring plates came off different wrecks and
+    do not match in tone, rust bleeds down from every seam, the cut edges are
+    torch-scorched, and wherever something rubs the metal shows through.
+    """
+    g = Graph(name, **world)
+    tone = g.band(g.noise(6, detail=2), 0.3, 0.7)
+    rust = g.band(g.noise(50, detail=6, distortion=0.4), 0.52, 0.75)
+    runs = g.band(g.noise(30, vector=g.stretched(10, 10, 1)), 0.5, 0.78)
+    scorch = g.math("MULTIPLY", g.edges(0.012), g.band(g.noise(25), 0.35, 0.65))
+    polish = g.math("MULTIPLY", g.edges(0.003), 0.7)
+    pitting = g.noise(400, detail=3)
+    grime = g.math("SUBTRACT", 1.0, g.occlusion(0.008))
+
+    c = g.mix(tone, [v * 1.18 for v in colour], [v * 0.72 for v in colour])
+    c = g.mix(g.math("MULTIPLY", pitting, 0.25), c, [v * 0.6 for v in colour])
+    c = g.mix(g.math("MAXIMUM", rust, g.math("MULTIPLY", runs, 0.7)), c, (0.2, 0.08, 0.03))
+    c = g.mix(g.math("MULTIPLY", scorch, 0.8), c, (0.045, 0.032, 0.024))
+    c = g.mix(polish, c, (0.4, 0.36, 0.31))
+    c = g.mix(g.math("MULTIPLY", grime, 0.6), c, (0.025, 0.02, 0.015))
+    roughness = g.mixf(polish, g.mixf(rust, 0.6, 0.9), 0.35)
+    height = g.math("ADD", g.math("MULTIPLY", pitting, 0.5), rust)
+    return g.finish(c, roughness, height, strength=0.3, distance=0.001)
+
+
+def rockcrete(name="rockcrete", colour=(0.16, 0.12, 0.085), **world):
+    """Poured slab: aggregate in the face, hairline cracks, oil and soot stains,
+    corners knocked off. Laid in a grid, which here is the point."""
+    g = Graph(name, **world)
+    aggregate = g.noise(300, detail=2)
+    mottle = g.band(g.noise(14, detail=4), 0.3, 0.7)
+    cracks = g.cracks(14, 0.018)
+    stains = g.band(g.noise(10, detail=6, distortion=0.5), 0.58, 0.8)
+    knocks = g.math("MULTIPLY", g.edges(0.01), g.band(g.noise(60, detail=3), 0.4, 0.6))
+    grime = g.math("SUBTRACT", 1.0, g.occlusion(0.01))
+
+    c = g.mix(mottle, [v * 1.12 for v in colour], [v * 0.8 for v in colour])
+    c = g.mix(g.band(aggregate, 0.55, 0.7), c, [v * 1.5 for v in colour])
+    c = g.mix(g.math("MULTIPLY", stains, 0.85), c, (0.03, 0.025, 0.02))
+    c = g.mix(g.math("MULTIPLY", cracks, 0.9), c, (0.02, 0.016, 0.012))
+    c = g.mix(knocks, c, [v * 1.4 for v in colour])
+    c = g.mix(g.math("MULTIPLY", grime, 0.6), c, (0.02, 0.016, 0.012))
+    height = g.math("SUBTRACT", g.math("MULTIPLY", aggregate, 0.4), g.math("MAXIMUM", cracks, knocks))
+    return g.finish(c, g.mixf(stains, 0.9, 0.6), height, strength=0.4, distance=0.002)
+
+
+def grate(name="grate", colour=(0.14, 0.11, 0.085), **world):
+    """Walkway decking: dark iron worn bright along the top of every bar."""
+    g = Graph(name, **world)
+    rust = g.band(g.noise(45, detail=5), 0.5, 0.75)
+    worn = g.math("MULTIPLY", g.edges(0.004), g.facing_up(0.3, 0.8))
+    grime = g.math("SUBTRACT", 1.0, g.occlusion(0.008))
+
+    c = g.mix(rust, colour, (0.17, 0.07, 0.03))
+    c = g.mix(worn, c, (0.36, 0.32, 0.27))
+    c = g.mix(g.math("MULTIPLY", grime, 0.7), c, (0.015, 0.012, 0.01))
+    return g.finish(c, g.mixf(worn, g.mixf(rust, 0.65, 0.9), 0.35), rust, strength=0.25, distance=0.001)
+
+
+def hazard(name="hazard", **world):
+    """Hazard stripes, bone on soot, scuffed down to ghosts where boots and
+    loads have passed over them for years."""
+    g = Graph(name, **world)
+    stripes = g.stripes(12)
+    wear = g.band(g.noise(30, detail=6, distortion=0.3), 0.42, 0.68)
+    chips = g.math("MULTIPLY", g.edges(0.006), g.band(g.noise(120, detail=4), 0.4, 0.55))
+    grime = g.math("SUBTRACT", 1.0, g.occlusion(0.008))
+
+    painted = g.math("MULTIPLY", stripes, g.math("SUBTRACT", 1.0, g.math("MULTIPLY", wear, 0.8)))
+    c = g.mix(painted, (0.05, 0.042, 0.035), (0.46, 0.39, 0.28))
+    c = g.mix(g.math("MAXIMUM", chips, g.math("MULTIPLY", wear, 0.35)), c, (0.2, 0.15, 0.11))
+    c = g.mix(g.math("MULTIPLY", grime, 0.6), c, (0.02, 0.016, 0.012))
+    height = g.math("SUBTRACT", 1.0, chips)
+    return g.finish(c, g.mixf(wear, 0.6, 0.85), height, strength=0.3, distance=0.001)
+
+
+def structure_surfaces(scale, ash=1.0):
+    """Everything a Directorate building is made of, sized for `scale`."""
+    world = {"scale": scale, "ash": ash}
+    return {
+        **directorate_surfaces(**world),
+        "plate": plate(**world),
+        "rockcrete": rockcrete(**world),
+        "grate": grate(**world),
+        "hazard": hazard(**world),
     }
 
 
@@ -270,6 +415,35 @@ def unwrap(obj, kit, margin=0.003):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
+def bake_device():
+    """The GPU if Cycles can use one, else the CPU.
+
+    Every surface samples ambient occlusion several times per texel, so a
+    building's 2048 texture on the CPU is an afternoon. The noise is the same
+    on either device; only the sampling grain differs, below what a texture
+    this size can show. RTS_BAKE_DEVICE=CPU forces the CPU.
+    """
+    if os.environ.get("RTS_BAKE_DEVICE", "").upper() == "CPU":
+        return "CPU"
+    try:
+        prefs = bpy.context.preferences.addons["cycles"].preferences
+    except KeyError:
+        return "CPU"
+    for backend in ("OPTIX", "CUDA", "HIP", "ONEAPI", "METAL"):
+        try:
+            prefs.compute_device_type = backend
+        except TypeError:
+            continue
+        prefs.get_devices()
+        gpus = [d for d in prefs.devices if d.type == backend]
+        if gpus:
+            for device in prefs.devices:
+                device.use = device.type == backend
+            print(f"bake: {backend} on {', '.join(d.name for d in gpus)}")
+            return "GPU"
+    return "CPU"
+
+
 def bake(obj, kit, name, size=1024, keep=("lamp",), samples=32):
     """Bake every surface on `obj` into colour, roughness and normal images, then
     replace them with one material reading those images.
@@ -279,7 +453,7 @@ def bake(obj, kit, name, size=1024, keep=("lamp",), samples=32):
     """
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
-    scene.cycles.device = "CPU"
+    scene.cycles.device = bake_device()
     scene.cycles.samples = samples
     scene.render.bake.margin = 6
     scene.render.bake.use_clear = True
@@ -305,7 +479,9 @@ def bake(obj, kit, name, size=1024, keep=("lamp",), samples=32):
     ):
         for node in targets:
             node.image = images[kind]
+        started = time.time()
         bpy.ops.object.bake(type=bake_type, pass_filter=passes)
+        print(f"bake: {name} {kind} {size}px in {time.time() - started:.0f}s")
     for image in images.values():
         image.pack()
 

@@ -58,8 +58,15 @@ noise and edge detection. A script builds a model in those, unwraps it once,
 and bakes everything with Cycles into a colour, roughness and normal map. The
 model ships with a single material reading them, plus one untextured material
 for anything that glows, so however many surfaces a model has it costs two draw
-calls. A bake takes under a minute; `RTS_TEXTURE_SIZE=256` makes trial runs
-quicker, and the images are also written to `art/previews/textures/`.
+calls. A bake takes under a minute for a figure, and runs on the GPU when Cycles
+finds one -- a building's larger texture needs it (`RTS_BAKE_DEVICE=CPU`
+forces the CPU). `RTS_TEXTURE_SIZE=256` makes trial runs quicker, and the
+images are also written to `art/previews/textures/`.
+
+**Structures are built at their real footprint** and shrunk into the unit box
+at the end (see Size below), so that the surfaces' wear is sized in tiles like
+everything else; `surfaces.structure_surfaces(scale=...)` enlarges every noise
+and distance by that factor, and adds settled ash on everything facing up.
 
 Two things to know when writing surfaces. Texture coordinates are object space
 in tiles, so noise scales run into the hundreds on a figure half a tile tall.
@@ -205,14 +212,30 @@ buys speed with a few rules:
   | `walk` | moving | looped, sped up or slowed to match the unit's speed |
   | `fire` | on every shot | once, then back to `idle` or `walk` |
 
-  Any clip named `fire`, `attack`, `death` or `die` plays once; every other name
-  loops. A missing clip falls back to `idle`, and a model with no clips at all
-  is drawn in its bind pose.
+  Any clip named `fire`, `attack`, `death`, `die`, `build` or `release` plays
+  once; every other name loops. A missing clip falls back to `idle`, and a model
+  with no clips at all is drawn in its bind pose.
+
+  Structures are rigged the same way, and have clips of their own:
+
+  | Clip | When | Plays |
+  |---|---|---|
+  | `build` | under construction | **scrubbed by construction progress**, not played in time: a site half built shows the clip's middle frame, however long it has taken. Its last frame should be the finished building at rest |
+  | `idle` | standing | looped |
+  | `produce` | anything in its production queue | looped |
+  | `release` | each time a unit it made comes out | once, then back to `produce` or `idle` |
+
+  A structure with a `build` clip is drawn at full size throughout its
+  construction, and the clip is the whole of how progress is shown; one without
+  rises out of the ground as before. `scripts/models/bastion.py` is the
+  example: its hull drops onto the apron, the legs deploy, the tower runs up.
 - **Key at 30 frames per second.** That is the rate clips are baked at; a
   one-frame recoil keyed at 24 fps falls between two baked frames.
 - **Rotation is what animates well.** Keys are baked exactly, but the shader
   blends between baked frames linearly, which is invisible for a limb and
   noticeable for a whole figure spinning through half a turn in one frame.
+  Location and scale bake exactly too, and blend without any such artefact: a
+  hull dropping from the sky or a shutter squashed up into its housing is fine.
 - Export with **Animation → Mode: Actions**, **Skinning** on, and **Apply
   Modifiers off** -- applying the armature modifier bakes a pose into the mesh.
   Apply any other modifier (a bevel) by hand before exporting, or it is lost.

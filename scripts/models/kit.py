@@ -209,6 +209,30 @@ def ellipsoid(radii, centre=(0, 0, 0), segments=12, rings=8):
     return bm
 
 
+def prism(points, z0, z1, top_scale=1.0, centre=(0, 0), open_top=False):
+    """A polygon (x, y points, anticlockwise) extruded from z0 to z1, the top
+    scaled about the centre: hulls with sloped walls, towers, hoppers (a
+    `top_scale` above 1 flares out, and `open_top` leaves the mouth open)."""
+    bm = bmesh.new()
+    cx, cy = centre
+    bottom = [bm.verts.new((cx + x, cy + y, z0)) for x, y in points]
+    top = [bm.verts.new((cx + x * top_scale, cy + y * top_scale, z1)) for x, y in points]
+    bm.faces.new(list(reversed(bottom)))
+    if not open_top:
+        bm.faces.new(top)
+    for i in range(len(points)):
+        j = (i + 1) % len(points)
+        bm.faces.new((bottom[i], bottom[j], top[j], top[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
+
+
+def octagon(half, chamfer):
+    """A square of half-width `half` with its corners cut back by `chamfer`."""
+    h, c = half, chamfer
+    return [(h, -h + c), (h, h - c), (h - c, h), (-h + c, h), (-h, h - c), (-h, -h + c), (-h + c, -h), (h - c, -h)]
+
+
 def bevel(obj, width=0.008, segments=1, angle=40):
     """Chamfer the hard edges.
 
@@ -299,7 +323,7 @@ def save_blend(content_id):
     return path
 
 
-def previews(col, out_dir, name, views=((35, 30), (35, 210), (60, 120)), poses=()):
+def previews(col, out_dir, name, views=((35, 30), (35, 210), (60, 120)), poses=(), frame=1.15):
     """Render the model from a few angles, lit like the game.
 
     Not for the player -- for checking the model without opening Blender. The
@@ -308,7 +332,8 @@ def previews(col, out_dir, name, views=((35, 30), (35, 210), (60, 120)), poses=(
     the same in the Ashworks.
 
     `poses` is a list of `(label, setup)` for a rigged model: each `setup()`
-    poses it, and it is rendered again from the first view.
+    poses it, and it is rendered again from the first view. `frame` is how
+    much of the scene the camera takes in, in the model's own units.
     """
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_EEVEE"
@@ -346,7 +371,7 @@ def previews(col, out_dir, name, views=((35, 30), (35, 210), (60, 120)), poses=(
 
     cam = bpy.data.cameras.new("camera")
     cam.type = "ORTHO"
-    cam.ortho_scale = 1.15
+    cam.ortho_scale = frame
     cam_obj = bpy.data.objects.new("camera", cam)
     helpers.objects.link(cam_obj)
     scene.camera = cam_obj
@@ -485,17 +510,46 @@ def pose_rotation(rig, bone_name, axis, degrees):
     instead of working out each bone's local frame by hand.
     """
     rest = rig.data.bones[bone_name].matrix_local.to_3x3()
-    rotation = Matrix.Rotation(math.radians(degrees), 3, axis)
+    rotation = Matrix.Rotation(math.radians(degrees), 3, axis if isinstance(axis, str) else Vector(axis).normalized())
     return (rest.inverted() @ rotation @ rest).to_quaternion()
+
+
+def pose_location(rig, bone_name, offset):
+    """A pose translation given in armature space, as the bone-local vector Blender stores."""
+    rest = rig.data.bones[bone_name].matrix_local.to_3x3()
+    return rest.inverted() @ Vector(offset)
+
+
+def pose_scale(rig, bone_name, factors):
+    """A pose scale given along armature axes, as bone-local factors.
+
+    Exact for bones that lie along an armature axis, which is every bone a
+    structure has: an upright bone's own Y is the armature's Z, so "squash it
+    vertically" has to be written to Y.
+    """
+    if isinstance(factors, (int, float)):
+        return Vector((factors, factors, factors))
+    rest = rig.data.bones[bone_name].matrix_local.to_3x3()
+    local = Vector((1.0, 1.0, 1.0))
+    for axis in range(3):
+        column = rest.col[axis]
+        dominant = max(range(3), key=lambda k: abs(column[k]))
+        local[axis] = factors[dominant]
+    return local
 
 
 def clip(rig, name, frames, keys):
     """Keyframe one action.
 
-    `keys` maps a frame number to `{bone: [(axis, degrees), ...]}`; rotations on
-    one bone are composed in order. Every bone of the rig is keyed on every
-    listed frame, at rest where the frame does not mention it, so a clip never
-    inherits a pose left behind by another.
+    `keys` maps a frame number to `{bone: [entry, ...]}`. An entry is
+    `(axis, degrees)`, a rotation about an armature axis ("X", or any vector),
+    and rotations on one bone are composed in order; `("loc", (x, y, z))`, an
+    offset in armature space; `("scale", s)`, uniform or `(x, y, z)` along
+    armature axes; or `("stretch", s)`, along the bone's own length.
+    Structures need all three -- a hull dropping onto its feet is a move, and a
+    shutter rolling up into its housing is a squash. Every bone of the rig is
+    keyed on every listed frame, at rest where the frame does not mention it,
+    so a clip never inherits a pose left behind by another.
 
     Keyed at 30 frames per second, the rate the game bakes at, so a frame in a
     script is a frame in the game.
@@ -516,13 +570,92 @@ def clip(rig, name, frames, keys):
 
     for frame in sorted(keys):
         for bone in bones:
-            q = Matrix.Identity(3).to_quaternion()
-            for axis, degrees in keys[frame].get(bone, []):
-                q = pose_rotation(rig, bone, axis, degrees) @ q
-            pb = rig.pose.bones[bone]
-            pb.rotation_quaternion = q
-            pb.keyframe_insert("rotation_quaternion", frame=frame)
+            key_pose(rig, bone, frame, keys[frame].get(bone, []))
 
+    return _finish_clip(rig, action, name, frames)
+
+
+def track_clip(rig, name, frames, tracks, linear=()):
+    """Keyframe one action from per-bone tracks.
+
+    `tracks` maps a bone to `{frame: [entry, ...]}`, entries as for `clip`.
+    Each bone is keyed only on its own frames, so it moves on its own schedule
+    and eases between its own keys -- a structure unfolding is a dozen parts
+    each doing one thing in turn, and keying every bone on every frame anyone
+    moves would make each of them stutter through everyone else's timing.
+
+    Every bone is also keyed on the first and last frames, holding its first
+    and last pose, so nothing leaks in from another clip. Bones named in
+    `linear` interpolate linearly: a spinning beacon should not ease in and out
+    of every quarter turn.
+    """
+    scene = bpy.context.scene
+    scene.render.fps = 30
+    scene.render.fps_base = 1.0
+    rig.animation_data_create()
+    action = bpy.data.actions.new(name)
+    rig.animation_data.action = action
+    for pb in rig.pose.bones:
+        pb.rotation_mode = "QUATERNION"
+
+    for pb in rig.pose.bones:
+        track = tracks.get(pb.name, {})
+        frames_here = sorted(track)
+        first = track[frames_here[0]] if frames_here else []
+        last = track[frames_here[-1]] if frames_here else []
+        schedule = {0: first, frames: last, **track}
+        for frame in sorted(schedule):
+            key_pose(rig, pb.name, frame, schedule[frame])
+
+    if linear:
+        for fcurve in _fcurves(action):
+            if any(f'"{bone}"' in fcurve.data_path for bone in linear):
+                for point in fcurve.keyframe_points:
+                    point.interpolation = "LINEAR"
+
+    return _finish_clip(rig, action, name, frames)
+
+
+def _fcurves(action):
+    """An action's curves. Blender 4.4 moved them under layers, strips and
+    channelbags; older files still have them on the action."""
+    if hasattr(action, "fcurves") and len(action.fcurves) > 0:
+        return list(action.fcurves)
+    curves = []
+    for layer in getattr(action, "layers", []):
+        for strip in layer.strips:
+            for bag in strip.channelbags:
+                curves.extend(bag.fcurves)
+    return curves
+
+
+def key_pose(rig, bone, frame, entries):
+    """Key one bone's rotation, location and scale at `frame`, at rest unless
+    `entries` says otherwise."""
+    q = Matrix.Identity(3).to_quaternion()
+    location = Vector((0.0, 0.0, 0.0))
+    scale = Vector((1.0, 1.0, 1.0))
+    for kind, value in entries:
+        if kind == "loc":
+            location = pose_location(rig, bone, value)
+        elif kind == "scale":
+            scale = pose_scale(rig, bone, value)
+        elif kind == "stretch":
+            # Along the bone itself, toward its head: a telescoping leg, a mast
+            # run out of its housing, a shutter rolled up.
+            scale = Vector((1.0, value, 1.0))
+        else:
+            q = pose_rotation(rig, bone, kind, value) @ q
+    pb = rig.pose.bones[bone]
+    pb.rotation_quaternion = q
+    pb.location = location
+    pb.scale = scale
+    pb.keyframe_insert("rotation_quaternion", frame=frame)
+    pb.keyframe_insert("location", frame=frame)
+    pb.keyframe_insert("scale", frame=frame)
+
+
+def _finish_clip(rig, action, name, frames):
     action.use_frame_range = True
     action.frame_start = 0
     action.frame_end = frames
