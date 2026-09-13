@@ -29,6 +29,21 @@ holds what they share: the faction palettes, the team mask, bevels, and an
 export using exactly the settings below — so a scripted model cannot get them
 wrong.
 
+**Textures are baked, not painted.** `scripts/models/surfaces.py` has the
+factions' surfaces as procedural node trees — canvas with a weave, leather,
+cracked ceramic, rusting iron, chipped team paint, rubber — drawing wear from
+noise and edge detection. A script builds a model in those, unwraps it once,
+and bakes everything with Cycles into a colour, roughness and normal map. The
+model ships with a single material reading them, plus one untextured material
+for anything that glows, so however many surfaces a model has it costs two draw
+calls. A bake takes under a minute; `RTS_TEXTURE_SIZE=256` makes trial runs
+quicker, and the images are also written to `art/previews/textures/`.
+
+Two things to know when writing surfaces. Texture coordinates are object space
+in tiles, so noise scales run into the hundreds on a figure half a tile tall.
+And pieces of a scripted model interpenetrate, so baked ambient occlusion has
+to reach only millimetres, or anything seated in anything else bakes black.
+
 **The script is the source, and it overwrites both files every run.** To take a
 model further by hand, open its `.blend`, work on it there, export from Blender
 with the settings below, and stop running its script — or the next run replaces

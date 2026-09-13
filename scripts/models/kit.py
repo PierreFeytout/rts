@@ -173,6 +173,42 @@ def beam(start, end, thickness, width=None):
     return bm
 
 
+def frustum(bottom, top, z0, z1, centre=(0, 0)):
+    """A box tapering from `bottom` (x, y) at z0 to `top` (x, y) at z1: limbs, torsos."""
+    bm = bmesh.new()
+    verts = bmesh.ops.create_cube(bm, size=1.0)["verts"]
+    for v in verts:
+        size = top if v.co.z > 0 else bottom
+        v.co.x = centre[0] + v.co.x * size[0]
+        v.co.y = centre[1] + v.co.y * size[1]
+        v.co.z = z1 if v.co.z > 0 else z0
+    return bm
+
+
+def rod(start, end, radius, segments=8, radius_end=None):
+    """A round bar from `start` to `end`: hoses, barrels, sleeves, rivets."""
+    a, b = Vector(start), Vector(end)
+    direction = b - a
+    bm = bmesh.new()
+    verts = bmesh.ops.create_cone(
+        bm, cap_ends=True, cap_tris=False, segments=segments,
+        radius1=radius, radius2=radius if radius_end is None else radius_end, depth=direction.length,
+    )["verts"]
+    rot = direction.to_track_quat("Z", "Y").to_matrix()
+    bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=rot, verts=verts)
+    bmesh.ops.translate(bm, vec=(a + b) / 2, verts=verts)
+    return bm
+
+
+def ellipsoid(radii, centre=(0, 0, 0), segments=12, rings=8):
+    """A squashed sphere: helmet crowns, domes, knuckles."""
+    bm = bmesh.new()
+    verts = bmesh.ops.create_uvsphere(bm, u_segments=segments, v_segments=rings, radius=1.0)["verts"]
+    bmesh.ops.scale(bm, vec=Vector(radii), verts=verts)
+    bmesh.ops.translate(bm, vec=Vector(centre), verts=verts)
+    return bm
+
+
 def bevel(obj, width=0.008, segments=1, angle=40):
     """Chamfer the hard edges.
 
@@ -519,6 +555,10 @@ def export_rigged(col, content_id, directory=MODELS_OUT):
         export_animations=True,
         export_animation_mode="ACTIONS",
         export_extras=True,
+        # JPEG rather than PNG: baked noise barely compresses losslessly, and
+        # three textures a model as PNG weighed more than the whole soundtrack.
+        export_image_format="JPEG",
+        export_image_quality=90,
         export_cameras=False,
         export_lights=False,
     )
