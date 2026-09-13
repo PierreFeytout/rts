@@ -13,6 +13,31 @@ rule still loads. It just looks wrong in the specific way the warning describes.
 See UNIVERSE.md for what things should *look* like. This file is only about what
 the engine needs.
 
+## Models built by script
+
+The shipped models are Python scripts in `scripts/models/`, run in Blender
+without its interface:
+
+```bash
+blender -b --factory-startup --python scripts/models/servitor.py
+```
+
+Each builds its model from nothing, exports the `.glb` here, saves a `.blend` to
+`art/models/`, and renders preview images lit like the game (to
+`art/previews/`, or wherever `RTS_PREVIEW_DIR` points). `scripts/models/kit.py`
+holds what they share: the faction palettes, the team mask, bevels, and an
+export using exactly the settings below — so a scripted model cannot get them
+wrong.
+
+**The script is the source, and it overwrites both files every run.** To take a
+model further by hand, open its `.blend`, work on it there, export from Blender
+with the settings below, and stop running its script — or the next run replaces
+the hand work with the generated version.
+
+`shipped-models.test.ts` loads every `.glb` in this folder and fails if one is
+named after nothing the game draws, holds more than one scene, or breaks any
+rule below.
+
 ---
 
 ## Naming

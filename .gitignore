@@ -11,3 +11,10 @@ coverage/
 .env.*
 !.env.example
 release/
+
+# Blender writes a .blend1 backup beside every save. The model scripts overwrite
+# their .blend on every run, so the backup is only ever the previous generated
+# version of a file that can be regenerated.
+*.blend1
+# Default output of scripts/models/*.py previews when RTS_PREVIEW_DIR is unset.
+art/previews/

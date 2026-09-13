@@ -1,0 +1,330 @@
+"""
+Shared tooling for building unit and building models in headless Blender.
+
+Every model in the game is a Python script, run with
+
+    blender -b --factory-startup --python scripts/models/<model>.py
+
+which builds the model from nothing, exports the .glb the game loads, saves a
+.blend an artist can open and keep working on, and renders preview images.
+
+The same bargain as the terrain textures and the soundtrack: generated rather
+than hand-authored, the generator committed beside its output, and the output an
+ordinary file that can be replaced by a hand-made one without touching code.
+A script is reviewable and diffable in a way a .blend never is, and running it
+again reproduces the model exactly.
+
+The rules every model must follow are in packages/client/assets/models/README.md
+and are checked by the game at load. This module exists so that each model script
+follows them without having to know them.
+"""
+
+import math
+import os
+
+import bmesh
+import bpy
+from mathutils import Matrix, Vector
+
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+MODELS_OUT = os.path.join(REPO, "packages", "client", "assets", "models")
+BLEND_OUT = os.path.join(REPO, "art", "models")
+
+TEAM_MASK = "_TEAMMASK"
+
+
+# ---------------------------------------------------------------------------
+# Scene
+# ---------------------------------------------------------------------------
+
+def fresh_scene():
+    """Start from an empty file.
+
+    `--factory-startup` gives the default cube, camera and light. They are
+    removed rather than hidden: anything left in the file is something the
+    exporter can pick up, and the one scene this file has is the only one
+    exported -- the multiple-scene trap the model README warns about cannot
+    happen in a file that never has a second scene.
+    """
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    for mesh in list(bpy.data.meshes):
+        bpy.data.meshes.remove(mesh)
+    for material in list(bpy.data.materials):
+        bpy.data.materials.remove(material)
+    scene = bpy.context.scene
+    scene.unit_settings.system = "METRIC"
+    scene.unit_settings.scale_length = 1.0
+    return scene
+
+
+def collection(name):
+    col = bpy.data.collections.new(name)
+    bpy.context.scene.collection.children.link(col)
+    return col
+
+
+# ---------------------------------------------------------------------------
+# Materials
+#
+# Linear colours, which is what Blender's colour sockets and three.js's material
+# colours both mean. Metalness is kept low on purpose: the game has no
+# environment map, and a highly metallic surface with nothing to reflect renders
+# nearly black -- a model that looks right in Blender's viewport, which does
+# have an environment, would come out as a silhouette in the match.
+# ---------------------------------------------------------------------------
+
+def material(name, colour, roughness=0.6, metallic=0.2, emission=None, strength=0.0):
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes["Principled BSDF"]
+    bsdf.inputs["Base Color"].default_value = (*colour, 1.0)
+    bsdf.inputs["Roughness"].default_value = roughness
+    bsdf.inputs["Metallic"].default_value = metallic
+    if emission is not None:
+        bsdf.inputs["Emission Color"].default_value = (*emission, 1.0)
+        bsdf.inputs["Emission Strength"].default_value = strength
+    return mat
+
+
+def directorate_palette():
+    """The Ashen Directorate's materials. See UNIVERSE.md.
+
+    `paint` is the 45% grey the game turns into exactly the owning player's
+    colour; its brightness is the paint's, its hue is the player's.
+    """
+    return {
+        # Lighter than a real iron would be. Seen from the game camera, against
+        # dark ground under a low warm key, the first Servitor's hull vanished
+        # into the floor and only its paint was visible.
+        "iron": material("iron", (0.23, 0.18, 0.13), roughness=0.58, metallic=0.25),
+        "dark": material("dark", (0.032, 0.027, 0.023), roughness=0.72, metallic=0.18),
+        "paint": material("paint", (0.45, 0.45, 0.45), roughness=0.62, metallic=0.08),
+        "lamp": material(
+            "lamp", (0.9, 0.52, 0.16), roughness=0.4, metallic=0.0,
+            # Strength 2.5, not more. At 6 the lamp saturated to white in the game,
+            # and white is the one colour the palette reserves for nothing at all.
+            emission=(1.0, 0.55, 0.15), strength=2.5,
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Geometry
+# ---------------------------------------------------------------------------
+
+def mesh_object(name, bm, mat, col, painted=False):
+    """Turn a bmesh into an object with one material, and mark it if painted.
+
+    One material per part keeps the team mask trivial: a painted part is 1
+    everywhere and anything else carries no mask at all, which the game reads as
+    0. The exporter splits by material regardless, so nothing is lost by it.
+    """
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    me.materials.append(mat)
+    if painted:
+        attr = me.attributes.new(name=TEAM_MASK, type="FLOAT", domain="POINT")
+        attr.data.foreach_set("value", [1.0] * len(me.vertices))
+    obj = bpy.data.objects.new(name, me)
+    col.objects.link(obj)
+    return obj
+
+
+def box(size, centre=(0, 0, 0), rotation=None):
+    """A box as a bmesh: `size` is full extents, `centre` its middle."""
+    bm = bmesh.new()
+    verts = bmesh.ops.create_cube(bm, size=1.0)["verts"]
+    bmesh.ops.scale(bm, vec=Vector(size), verts=verts)
+    if rotation is not None:
+        bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=rotation, verts=verts)
+    bmesh.ops.translate(bm, vec=Vector(centre), verts=verts)
+    return bm
+
+
+def cylinder(radius, depth, segments=10, centre=(0, 0, 0), axis="Z", cap_top=True):
+    """A cylinder along `axis`. Low segment counts on purpose; see the budget."""
+    bm = bmesh.new()
+    verts = bmesh.ops.create_cone(
+        bm, cap_ends=True, cap_tris=False, segments=segments,
+        radius1=radius, radius2=radius, depth=depth,
+    )["verts"]
+    if axis == "X":
+        bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, "Y"), verts=verts)
+    elif axis == "Y":
+        bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, "X"), verts=verts)
+    bmesh.ops.translate(bm, vec=Vector(centre), verts=verts)
+    return bm
+
+
+def beam(start, end, thickness, width=None):
+    """A square-section bar from `start` to `end`: arms, struts, frames."""
+    a, b = Vector(start), Vector(end)
+    direction = b - a
+    length = direction.length
+    bm = box((length, width if width is not None else thickness, thickness))
+    rot = direction.to_track_quat("X", "Z").to_matrix()
+    bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=rot, verts=bm.verts)
+    bmesh.ops.translate(bm, vec=(a + b) / 2, verts=bm.verts)
+    return bm
+
+
+def bevel(obj, width=0.008, segments=1, angle=40):
+    """Chamfer the hard edges.
+
+    The single change that most makes a low-poly model read as manufactured
+    rather than assembled from primitives: a bevelled edge catches the light, so
+    the silhouette of every plate is drawn with a thin highlight. Limited by
+    angle so flat faces are left alone and the triangle count stays sane.
+    """
+    mod = obj.modifiers.new("bevel", "BEVEL")
+    mod.width = width
+    mod.segments = segments
+    mod.limit_method = "ANGLE"
+    mod.angle_limit = math.radians(angle)
+    mod.harden_normals = False
+    return mod
+
+
+# ---------------------------------------------------------------------------
+# Checks, export, previews
+# ---------------------------------------------------------------------------
+
+def scale_all(col, factor):
+    """Scale a finished model about the origin, which keeps its base on the ground.
+
+    Models are built at a convenient size and then sized for the game in one
+    place, after they have been looked at from the game's camera -- which is the
+    only place a unit's size can actually be judged.
+    """
+    for obj in col.objects:
+        obj.scale = (factor, factor, factor)
+        obj.location = obj.location * factor
+    bpy.context.view_layer.update()
+
+
+def report(col):
+    """Triangles and bounds after modifiers -- what the game will actually get."""
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    triangles = 0
+    lo = Vector((math.inf, math.inf, math.inf))
+    hi = Vector((-math.inf, -math.inf, -math.inf))
+    materials = set()
+    for obj in col.objects:
+        if obj.type != "MESH":
+            continue
+        evaluated = obj.evaluated_get(depsgraph)
+        me = evaluated.to_mesh()
+        me.calc_loop_triangles()
+        triangles += len(me.loop_triangles)
+        for v in me.vertices:
+            w = obj.matrix_world @ v.co
+            lo = Vector(map(min, lo, w))
+            hi = Vector(map(max, hi, w))
+        materials.update(m.name for m in obj.data.materials)
+        evaluated.to_mesh_clear()
+    return {
+        "triangles": triangles,
+        "materials": sorted(materials),
+        "min": [round(c, 3) for c in lo],
+        "max": [round(c, 3) for c in hi],
+    }
+
+
+def export(col, content_id):
+    """Write the .glb the game loads, with exactly the settings the README gives."""
+    os.makedirs(MODELS_OUT, exist_ok=True)
+    path = os.path.join(MODELS_OUT, f"{content_id}.glb")
+    for obj in bpy.context.scene.objects:
+        obj.select_set(obj.name in col.objects)
+    bpy.ops.export_scene.gltf(
+        filepath=path,
+        export_format="GLB",
+        use_selection=True,
+        export_yup=True,
+        export_apply=True,
+        export_attributes=True,
+        export_materials="EXPORT",
+        export_cameras=False,
+        export_lights=False,
+    )
+    return path
+
+
+def save_blend(content_id):
+    os.makedirs(BLEND_OUT, exist_ok=True)
+    path = os.path.join(BLEND_OUT, f"{content_id}.blend")
+    bpy.ops.wm.save_as_mainfile(filepath=path, compress=True)
+    return path
+
+
+def previews(col, out_dir, name, views=((35, 30), (35, 210), (60, 120))):
+    """Render the model from a few angles, lit like the game.
+
+    Not for the player -- for checking the model without opening Blender. The
+    light is the game's: a low warm key and a cold rim, on a dark warm ground,
+    because a model judged under a bright neutral studio light will not look
+    the same in the Ashworks.
+    """
+    scene = bpy.context.scene
+    scene.render.engine = "BLENDER_EEVEE"
+    scene.render.resolution_x = 720
+    scene.render.resolution_y = 720
+    scene.render.film_transparent = False
+    scene.world = scene.world or bpy.data.worlds.new("world")
+    scene.world.use_nodes = True
+    scene.world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.02, 0.016, 0.012, 1)
+    scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.6
+
+    helpers = collection("preview")
+
+    ground = bpy.data.meshes.new("ground")
+    bm = bmesh.new()
+    bmesh.ops.create_grid(bm, x_segments=1, y_segments=1, size=2.0)
+    bm.to_mesh(ground)
+    bm.free()
+    ground.materials.append(material("ground", (0.06, 0.045, 0.032), roughness=0.95, metallic=0.0))
+    helpers.objects.link(bpy.data.objects.new("ground", ground))
+
+    key = bpy.data.lights.new("key", "SUN")
+    key.energy = 4.5
+    key.color = (1.0, 0.68, 0.38)
+    key_obj = bpy.data.objects.new("key", key)
+    key_obj.rotation_euler = (math.radians(58), 0, math.radians(-40))
+    helpers.objects.link(key_obj)
+
+    rim = bpy.data.lights.new("rim", "SUN")
+    rim.energy = 1.6
+    rim.color = (0.5, 0.62, 0.85)
+    rim_obj = bpy.data.objects.new("rim", rim)
+    rim_obj.rotation_euler = (math.radians(55), 0, math.radians(150))
+    helpers.objects.link(rim_obj)
+
+    cam = bpy.data.cameras.new("camera")
+    cam.type = "ORTHO"
+    cam.ortho_scale = 1.15
+    cam_obj = bpy.data.objects.new("camera", cam)
+    helpers.objects.link(cam_obj)
+    scene.camera = cam_obj
+
+    stats = report(col)
+    centre = Vector([(a + b) / 2 for a, b in zip(stats["min"], stats["max"])])
+
+    written = []
+    for elevation, azimuth in views:
+        el, az = math.radians(elevation), math.radians(azimuth)
+        offset = Vector((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el))) * 5
+        cam_obj.location = centre + offset
+        cam_obj.rotation_euler = (centre - cam_obj.location).to_track_quat("-Z", "Y").to_euler()
+        path = os.path.join(out_dir, f"{name}_{elevation}_{azimuth}.png")
+        scene.render.filepath = path
+        bpy.ops.render.render(write_still=True)
+        written.append(path)
+
+    # Out of the file again, so a saved .blend holds the model and nothing else.
+    for obj in list(helpers.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    bpy.data.collections.remove(helpers)
+    return written
