@@ -353,6 +353,7 @@ their colour while the building is selected.
   tower unfolds, the floodlight comes on. `idle` -- windows go light and dark
   as shifts change, the floodlight sweeps, a vent fan turns. No `produce` or
   `release`.
+  **Modelled** -- `scripts/models/habstack.py`.
 
 #### Gun Nest -- `vanguard.turret`
 
