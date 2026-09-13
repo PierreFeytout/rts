@@ -13,6 +13,7 @@ import { CAMERA_DISTANCE, IsoCamera } from "./iso-camera.js";
 import { groundGeometry, type TerrainMaterials } from "./materials.js";
 import type { ModelLibrary } from "./model-library.js";
 import { Minimap } from "./minimap.js";
+import { RallyMarkers } from "./rally-markers.js";
 import { Selection } from "./selection.js";
 import { TerrainRenderer } from "./terrain-renderer.js";
 import { WorldRenderer } from "./world-renderer.js";
@@ -162,6 +163,7 @@ export function startGame(options: GameOptions): RunningGame {
   const terrain = new TerrainRenderer(scene, options.terrain);
   const units = new WorldRenderer(scene, rig.camera, options.models);
   const effects = new Effects(scene);
+  const rallies = new RallyMarkers(scene);
   const fog = new FogRenderer(scene, mapTiles, localPlayer);
   const selection = new Selection(world, rig, canvas, localPlayer, (command: Command) =>
     session.submitLocal(command),
@@ -313,6 +315,7 @@ export function startGame(options: GameOptions): RunningGame {
     terrain.applyFog(world, localPlayer);
     fog.update(world);
     units.update(world, session.alpha, selection.selected, localPlayer);
+    rallies.update(world, selection.selected, localPlayer, performance.now() / 1000);
     effects.update(deltaSeconds);
     updateGhost();
     hud.update();

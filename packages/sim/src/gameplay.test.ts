@@ -509,6 +509,47 @@ describe("production", () => {
     expect(world.entities.queueLen[entityIndex(nexus)]).toBe(0);
   });
 
+  it("lets finished units out of the door, in the middle of the +X face", () => {
+    const { world, nexus } = factoryWorld();
+    const [bx, by] = pos(world, nexus);
+    const half = world.types.get(world.entities.typeId[entityIndex(nexus)]).footprint / 2;
+    world.step([{ kind: CMD_TRAIN, playerId: 0, building: nexus, unitType: FX_WORKER }]);
+
+    let trained: EntityId = -1;
+    for (let t = 0; t < 60 && trained < 0; t++) {
+      world.step([]);
+      for (const event of world.events.all) {
+        if (event.kind === EV_UNIT_TRAINED) trained = event.entity;
+      }
+    }
+    const [ux, uy] = pos(world, trained);
+    // Just past the +X edge, and within a tile of the face's middle.
+    expect(ux).toBeGreaterThan(bx + half);
+    expect(ux).toBeLessThan(bx + half + 1);
+    expect(Math.abs(uy - by)).toBeLessThanOrEqual(1);
+  });
+
+  it("still finds a way out when the door is blocked", () => {
+    const { world, nexus } = factoryWorld();
+    const i = entityIndex(nexus);
+    const span = world.types.get(world.entities.typeId[i]).footprint;
+    const [bx, by] = pos(world, nexus);
+    // Wall off the whole +X column in front of the door.
+    const doorX = Math.floor(bx + span / 2);
+    world.grid.fillRect(doorX, Math.floor(by - span / 2) - 1, 1, span + 2, 1);
+    world.step([{ kind: CMD_TRAIN, playerId: 0, building: nexus, unitType: FX_WORKER }]);
+
+    let trained: EntityId = -1;
+    for (let t = 0; t < 60 && trained < 0; t++) {
+      world.step([]);
+      for (const event of world.events.all) {
+        if (event.kind === EV_UNIT_TRAINED) trained = event.entity;
+      }
+    }
+    expect(trained).toBeGreaterThanOrEqual(0);
+    expect(pos(world, trained)[0]).toBeLessThan(doorX);
+  });
+
   it("sends finished units to the rally point", () => {
     const { world, nexus } = factoryWorld();
     world.step([

@@ -269,6 +269,12 @@ loops while anything is queued, `release` plays as a unit comes out. The game
 does not yet play `fire` on structures, nor aim a turret independently of its
 base -- see the notes on the two gun buildings.
 
+**Units come out on the +X side**, from the middle of that face, so every
+producing structure puts its door there -- whatever that door is. From there
+they walk to the building's rally point, which the player sets by
+right-clicking with the building selected, and which is drawn as a flag in
+their colour while the building is selected.
+
 ### The Ashen Directorate
 
 #### Bastion -- `vanguard.nexus`
@@ -323,7 +329,9 @@ base -- see the notes on the two gun buildings.
   roof closes over, the crane unfolds and the chimneys run up. `idle` -- the
   crucible glows low, the crane trolley rests. `produce` -- the crucible tips
   and pours, the trolley runs along the gantry, a press hammer strikes.
-  `release` -- the vehicle door lifts, and a lamp above it turns.
+  `release` -- the vehicle doors swing open on the lit hall, and a beacon over
+  them turns.
+  **Modelled** -- `scripts/models/foundry.py`.
 
 #### Habstack -- `vanguard.pylon`
 
@@ -382,14 +390,15 @@ is modelled.
 - **Silhouette:** a broken hyperboloid tower, taller on one side, with crust
   spilling out of the split. The largest Verdigris shape, and the only one
   with a tower's outline.
-- **Detail:** the split and the heart behind it, faintly lit (+X); the feeding
-  mouth where scrap goes in (-Y); veins -- once pipes -- running out across
-  the ground to the footprint's edges; stalactites under every lip.
+- **Detail:** the split and the heart behind it, faintly lit, with a birth sac
+  at its foot where Creepers come out (+X); the feeding mouth where scrap goes
+  in (-Y); veins -- once pipes -- running out across the ground to the
+  footprint's edges; stalactites under every lip.
 - **Colour (bloom):** oxide blooms around the split and along the veins.
 - **Clips:** `build` -- veins break the ash and crawl out to the edges, the
   tower's stump rises from the ground in their grip, crust swells up its walls,
   the split tears open, the blooms open. `idle` -- the heart swells and eases,
-  slowly, like breathing. `produce` -- faster, and a sac at the mouth fills.
+  slowly, like breathing. `produce` -- faster, and the birth sac fills.
   `release` -- the sac splits and folds back.
 
 #### Siphon -- `concord.siphon`
@@ -414,14 +423,16 @@ is modelled.
 *Footprint 3. Grows Flensers, Blightcasters and Behemoths.*
 
 - **Was:** the hull of a heavy war crawler, buried where it was knocked out
-  in the war -- the kind of wreck the hive first learned from, on the Sump. **Is:** the hull cankered open along its spine, its ribs
-  bared and grown thick, and gestation pits in its belly where what it grows
-  takes the shape of the machines it has eaten.
+  in the war -- the kind of wreck the hive first learned from, on the Sump.
+  **Is:** the hull cankered open along its spine, its ribs bared and grown
+  thick, and gestation pits in its belly where what it grows takes the shape
+  of the machines it has eaten.
 - **Silhouette:** a long, low, broken hull with ribs arching out of its back;
   the Foundry's counterpart, and as clearly a place that makes things.
 - **Detail:** the opened spine and the pits inside, faintly lit (+X); the tank's
   track and road wheels still visible under the crust (-Y); crust shelves
-  stepping down its sides; a birth opening at the front.
+  stepping down its sides; a birth opening at its +X end, where what it grows
+  comes out.
 - **Colour (bloom):** blooms along the ribs.
 - **Clips:** `build` -- the hull surfaces from the ash like a wreck from water,
   the spine splits, ribs lift out of it, crust climbs the sides, blooms open.

@@ -322,8 +322,11 @@ a bone) as well as rotation.
 - **`produce` loops cleanly**: its first and last keys are the same pose, and
   anything that spins is keyed `linear` so it does not ease through every
   quarter turn.
-- **`release` happens on a camera-facing face**, and is short: under two
-  seconds, since a queue can finish a unit every few.
+- **The door is on +X, and so is `release`.** Units come out of a producing
+  structure on its +X side, from the middle of that face outward
+  (`spawnFromBuilding` in packages/sim/src/production.ts), so whatever opens
+  to let them out -- a shutter, doors, a birth sac -- is there, centred. It is
+  short: under two seconds, since a queue can finish a unit every few.
 
 A research clip will follow the same pattern once the simulation has research.
 

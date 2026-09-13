@@ -182,9 +182,17 @@ export function runProduction(world: World): void {
 /**
  * Place a finished unit on an open tile beside its factory.
  *
- * The search spirals outward in a fixed order, so every peer picks the same
- * tile. Returns NULL_ENTITY when the building is walled in, which the caller
- * treats as "try again next tick" rather than as a failure.
+ * **Units come out of the door**, and every structure's door is on its +X
+ * side -- the convention the models follow (assets/models/README.md), where
+ * the Bastion's shutter and the Foundry's vehicle doors are. So each ring is
+ * searched along its +X column first, from the middle of that face outward,
+ * and only then around the rest of its perimeter. A unit that spawned on the
+ * far side of the building while its doors opened on the near one read as a
+ * unit appearing from nowhere.
+ *
+ * The order is fixed, so every peer picks the same tile. Returns NULL_ENTITY
+ * when the building is walled in, which the caller treats as "try again next
+ * tick" rather than as a failure.
  */
 function spawnFromBuilding(world: World, bi: number, unitType: number): EntityId {
   const store = world.entities;
@@ -194,40 +202,58 @@ function spawnFromBuilding(world: World, bi: number, unitType: number): EntityId
   const span = type.footprint > 0 ? type.footprint : 1;
 
   for (let ring = 1; ring <= 6; ring++) {
+    const door = span + ring - 1;
+    // The door column, middle first: 0, +1, -1, +2, -2, ... from the face's
+    // centre row, which for an even span is the row just past the middle.
+    // Twice the column's length, because the offsets alternate sides and the
+    // middle is off-centre for an even span; out-of-range rows are skipped.
+    const middle = span >> 1;
+    for (let k = 0; k < 2 * (span + 2 * ring); k++) {
+      const offset = k % 2 === 1 ? (k + 1) >> 1 : -(k >> 1);
+      const dy = middle + offset;
+      if (dy < -ring || dy > span + ring - 1) continue;
+      const id = trySpawnAt(world, bi, unitType, anchorX + door, anchorY + dy);
+      if (id !== NO_TILE) return id;
+    }
+
     for (let dy = -ring; dy < span + ring; dy++) {
-      for (let dx = -ring; dx < span + ring; dx++) {
-        // Perimeter of this ring only; the interior was covered by earlier ones.
-        const onEdge =
-          dx === -ring || dy === -ring || dx === span + ring - 1 || dy === span + ring - 1;
+      for (let dx = -ring; dx < span + ring - 1; dx++) {
+        // Perimeter of this ring only; the interior was covered by earlier
+        // ones, and the door column just now.
+        const onEdge = dx === -ring || dy === -ring || dy === span + ring - 1;
         if (!onEdge) continue;
-
-        const tx = anchorX + dx;
-        const ty = anchorY + dy;
-        if (!world.grid.inBounds(tx, ty) || world.grid.isBlocked(tx, ty)) continue;
-
-        const id = spawnTyped(
-          store,
-          world.types,
-          unitType,
-          tileCentre(tx),
-          tileCentre(ty),
-          store.owner[bi],
-        );
-        if (id === NULL_ENTITY) return NULL_ENTITY;
-
-        // Walk to the rally point, unless it is still the factory itself.
-        const ui = entityIndex(id);
-        const rx = store.rallyX[bi];
-        const ry = store.rallyY[bi];
-        if (rx !== store.posX[bi] || ry !== store.posY[bi]) {
-          store.orderKind[ui] = ORDER_MOVE;
-          walkTo(world, ui, rx, ry);
-        }
-        return id;
+        const id = trySpawnAt(world, bi, unitType, anchorX + dx, anchorY + dy);
+        if (id !== NO_TILE) return id;
       }
     }
   }
   return NULL_ENTITY;
+}
+
+/** `trySpawnAt` found the tile blocked or off the map; keep looking. */
+const NO_TILE = -2;
+
+/**
+ * Spawn a building's unit on one tile, and send it to the rally point.
+ * Returns NO_TILE if the tile cannot take it, and NULL_ENTITY if the entity
+ * store is full -- which no other tile would fix.
+ */
+function trySpawnAt(world: World, bi: number, unitType: number, tx: number, ty: number): EntityId {
+  const store = world.entities;
+  if (!world.grid.inBounds(tx, ty) || world.grid.isBlocked(tx, ty)) return NO_TILE;
+
+  const id = spawnTyped(store, world.types, unitType, tileCentre(tx), tileCentre(ty), store.owner[bi]);
+  if (id === NULL_ENTITY) return NULL_ENTITY;
+
+  // Walk to the rally point, unless it is still the factory itself.
+  const ui = entityIndex(id);
+  const rx = store.rallyX[bi];
+  const ry = store.rallyY[bi];
+  if (rx !== store.posX[bi] || ry !== store.posY[bi]) {
+    store.orderKind[ui] = ORDER_MOVE;
+    walkTo(world, ui, rx, ry);
+  }
+  return id;
 }
 
 /**
