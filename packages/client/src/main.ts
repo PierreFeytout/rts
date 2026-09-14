@@ -28,23 +28,22 @@ import { installStyles } from "./ui.js";
 enableDevChecks(import.meta.env.DEV);
 installStyles();
 
-// Decoded once, before the menu is even shown. Six PNGs and five minutes of
-// audio take long enough to be a visible hitch, and the moment it would
-// otherwise land is exactly when the player has just pressed Start.
+// Decoded once, before the menu is even shown. Textures and models take long
+// enough to be a visible hitch, and the moment it would otherwise land is
+// exactly when the player has just pressed Start.
 //
-// The music does not block the menu: a failure to decode should cost the
-// soundtrack, not the game.
-// Models load alongside the textures for the same reason, and never fail as a
-// whole: a file that will not parse costs that one model, which falls back to
-// its built-in silhouette.
+// Models never fail as a whole: a file that will not parse costs that one
+// model, which falls back to its built-in silhouette. Audio does not block the
+// menu at all: a failure there should cost the sound, not the game.
 const [terrain, models] = await Promise.all([
   loadTerrain(),
   loadModels((typeId) => defaultContent.contentIdOf(typeId)),
 ]);
 void music.load().catch((error: unknown) => console.warn("[rts] no music:", error));
+// Which slot and which file, for checking a soundtrack configuration from the console.
+if (import.meta.env.DEV) window.__music = music;
 
 for (;;) {
-  music.scene("menu");
   const launch = await chooseMatch();
   await runMatch(launch);
   await launch.release();
@@ -170,6 +169,7 @@ function cornerButton(
 
 declare global {
   interface Window {
+    __music?: typeof music;
     __rts?: RunningGame & {
       isHost: boolean;
       localPlayer: number;

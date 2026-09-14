@@ -1,9 +1,11 @@
+import { defaultContent } from "@rts/content";
 import { ReplayRecorder, type Replay } from "@rts/netcode";
 import type { GuestSession, HostSession } from "@rts/netcode";
 import { TICK_HZ, TICK_MS, hashToString, type Command, type World } from "@rts/sim";
 import * as THREE from "three";
 import type { AiDriver } from "./ai/driver.js";
-import { MusicDirector, music } from "./audio/music.js";
+import { MoodTracker, moodSlot } from "./audio/mood.js";
+import { music } from "./audio/music.js";
 import { CameraControls } from "./camera-controls.js";
 import { ControlGroups } from "./control-groups.js";
 import { Effects } from "./effects.js";
@@ -190,11 +192,12 @@ export function startGame(options: GameOptions): RunningGame {
   // burst, which is exactly when the most is happening.
   const ai = options.ai ?? new Map<number, AiDriver>();
 
-  // The score follows the match. Reads events only, touches no simulation
-  // state, and is in no hash -- two players can run completely different music
-  // and still agree on every tick.
-  music.scene("match");
-  const conductor = new MusicDirector(localPlayer);
+  // The music follows the local player's match: its race picks the tracks, how
+  // the fighting is going picks the mood, and the result has music of its own.
+  // Reads events and totals only; nothing here is simulation state.
+  const mood = new MoodTracker(localPlayer, music.moods);
+  let race = raceOf(world, localPlayer);
+  music.play(moodSlot("calm"), race);
 
   function wireTickHooks(target: MatchSession): void {
     target.onBeforeTick = (w) => {
@@ -210,8 +213,18 @@ export function startGame(options: GameOptions): RunningGame {
       // Shots, so a unit that fired plays its firing clip.
       units.ingest(w);
       hud.ingest(w);
-      conductor.ingest(w);
-      conductor.update(TICK_MS);
+      mood.ingest(w);
+      const current = mood.update(TICK_MS / 1000);
+      // A guest's world arrives in a snapshot, so the race may only be known
+      // once the first tick has run.
+      race ??= raceOf(w, localPlayer);
+      const players = w.players;
+      music.play(
+        players.winner === localPlayer ? "match.victory"
+        : players.winner >= 0 || players.defeated[localPlayer] === 1 ? "match.defeat"
+        : moodSlot(current),
+        race,
+      );
       recorder?.checkpoint(w);
     };
   }
@@ -483,4 +496,19 @@ function centreOnPlayerUnits(
   }
   if (count === 0) rig.lookAtGround(mapTiles / 2, mapTiles / 2);
   else rig.lookAtGround(sumX / count, sumY / count);
+}
+
+/**
+ * The race a player is playing, from what they own: content ids are
+ * `race.thing`. Null while they own nothing, which for a guest is until the
+ * first snapshot lands.
+ */
+function raceOf(world: World, player: number): string | null {
+  const e = world.entities;
+  for (let i = 0; i < e.highWater; i++) {
+    if (e.alive[i] !== 1 || e.owner[i] !== player) continue;
+    const id = defaultContent.contentIdOf(e.typeId[i]);
+    return id.slice(0, id.indexOf("."));
+  }
+  return null;
 }

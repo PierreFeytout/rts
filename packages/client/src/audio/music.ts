@@ -1,64 +1,55 @@
-import { EV_DEATH, EV_SHOT, type World } from "@rts/sim";
-import bedUrl from "../../assets/audio/bed.ogg";
-import dreadUrl from "../../assets/audio/dread.ogg";
-import leadUrl from "../../assets/audio/lead.ogg";
-import menuUrl from "../../assets/audio/menu.ogg";
-import pulseUrl from "../../assets/audio/pulse.ogg";
+import { defaultContent } from "@rts/content";
+import { EMPTY_CONFIG, parseMusicConfig, tracksFor, type MusicConfig, type Slot, type Track } from "./music-config.js";
 
 /**
- * The soundtrack.
+ * The music player.
  *
- * The music is rendered ahead of time as **stems** rather than as finished
- * tracks -- see scripts/generate-music.mjs -- and what plays is a live mix of
- * them. "The music gets tense" is therefore a gain envelope rather than a
- * second piece that would have to be beat-matched into the first.
+ * Plays the project's own recordings from assets/music, as music.json there
+ * assigns them to slots -- see assets/music/README.md. The game only ever says
+ * which slot it is in (`play`); which track that means, for which race, and
+ * what to fall back to when a slot has nothing, is the configuration's.
  *
- * All four match stems are one render cut into layers, so they are the same
- * tempo and exactly the same number of samples long. They are started at one
- * scheduled time on the audio clock and loop natively, which keeps them
- * sample-locked for as long as the match lasts. Starting them with four
- * separate calls to `play()` on four `<audio>` elements would drift within a
- * minute and turn the percussion into a flam.
- *
- * The stems are ordinary emitted assets, fetched and decoded at startup. That
- * only works in the packaged build because the renderer is served over `app://`
- * rather than `file://` -- Chromium refuses `fetch` on a file URL -- and for a
- * while before that existed they were inlined into the bundle as data URLs. See
- * `serveRenderer` in packages/desktop/src/main.ts.
+ * Tracks stream through `<audio>` elements rather than being decoded up front:
+ * a four-minute song decoded is tens of megabytes, and a soundtrack is many of
+ * them. Each element is routed through its own gain node into one master, and
+ * there are two of them -- decks -- so one track fades out while the next
+ * fades in.
  */
 
-const STEMS = ["bed", "pulse", "lead", "dread"] as const;
-type Stem = (typeof STEMS)[number];
+/** Every file in assets/music, by name, resolved to a URL at build time. */
+const FILES = import.meta.glob<string>("../../assets/music/*.{mp3,ogg,wav,m4a,flac}", {
+  eager: true,
+  query: "?url",
+  import: "default",
+});
 
-const URLS: Record<Stem | "menu", string> = {
-  bed: bedUrl,
-  pulse: pulseUrl,
-  lead: leadUrl,
-  dread: dreadUrl,
-  menu: menuUrl,
-};
-
-export type Scene = "menu" | "match" | "silent";
-
-/** Seconds to cross from one scene to another. Slow: this is not a transition. */
-const SCENE_FADE = 2.2;
-/** Seconds for a stem to follow the mix. Fast enough to feel caused, slow enough not to pump. */
-const MIX_FADE = 1.6;
+/** The configuration, if there is one. A missing file is silence, not an error. */
+const CONFIG_FILES = import.meta.glob<unknown>("../../assets/music/music.json", { eager: true, import: "default" });
 
 const VOLUME_KEY = "rts.musicVolume";
+
+interface Deck {
+  audio: HTMLAudioElement;
+  gain: GainNode;
+  track: Track | null;
+}
 
 class MusicPlayer {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
-  private readonly decoded = new Map<string, AudioBuffer>();
+  private decks: Deck[] = [];
+  /** Index into `decks` of the one playing, or fading in. */
+  private active = 0;
 
-  /** Currently sounding sources, by stem name, with their own gain. */
-  private voices = new Map<string, { source: AudioBufferSourceNode; gain: GainNode }>();
-  private current: Scene = "silent";
+  private config: MusicConfig = EMPTY_CONFIG;
+  private urls = new Map<string, string>();
+  private slot: Slot | null = null;
+  private race: string | null = null;
+  /** What the current slot may play, in the order to play it. */
+  private playlist: Track[] = [];
 
   private level = 0.6;
   private muted = false;
-  private ready = false;
 
   constructor() {
     try {
@@ -69,19 +60,20 @@ class MusicPlayer {
     }
   }
 
-  /**
-   * Decode every stem.
-   *
-   * Called once at startup, alongside the terrain textures. Decoding five
-   * minutes of audio takes long enough to be a visible hitch, and the moment it
-   * would otherwise land is when the player has just pressed Start.
-   */
+  /** Read the configuration and open the audio context. Called once at startup. */
   async load(): Promise<void> {
-    if (this.ready) return;
+    if (this.ctx) return;
 
-    // Constructed here rather than lazily, because a context created inside an
-    // event handler is the only kind some browsers will let you start -- and
-    // this runs from the module's top level, before any gesture.
+    for (const [path, url] of Object.entries(FILES)) this.urls.set(path.slice(path.lastIndexOf("/") + 1), url);
+    const raw = Object.values(CONFIG_FILES)[0];
+    if (raw !== undefined) {
+      const races = defaultContent.races.map((r) => r.id);
+      const { config, warnings } = parseMusicConfig(raw, new Set(this.urls.keys()), races);
+      this.config = config;
+      for (const warning of warnings) console.warn(`[rts] music.json: ${warning}`);
+    }
+    console.info(`[rts] music: ${this.config.tracks.length} tracks configured, ${this.urls.size} files`);
+
     const Ctor: typeof AudioContext =
       window.AudioContext ??
       (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -91,27 +83,31 @@ class MusicPlayer {
     const master = ctx.createGain();
     master.gain.value = this.muted ? 0 : this.level;
     master.connect(ctx.destination);
-
     this.ctx = ctx;
     this.master = master;
 
-    await Promise.all(
-      Object.entries(URLS).map(async ([name, url]) => {
-        const bytes = await (await fetch(url)).arrayBuffer();
-        this.decoded.set(name, await ctx.decodeAudioData(bytes));
-      }),
-    );
+    for (let k = 0; k < 2; k++) {
+      const audio = new Audio();
+      audio.preload = "auto";
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      ctx.createMediaElementSource(audio).connect(gain).connect(master);
+      const deck: Deck = { audio, gain, track: null };
+      // One track after another within a slot. A slot with a single track
+      // therefore plays it again, which is what a loop is.
+      audio.addEventListener("ended", () => {
+        if (this.decks[this.active] === deck) this.next();
+      });
+      this.decks.push(deck);
+    }
 
-    // Informational, and forwarded to the terminal when RTS_VERBOSE is set: the
-    // packaged build has no devtools, and "did the music load" is otherwise a
-    // question only somebody's ears can answer.
-    console.info(`[rts] music: ${this.decoded.size} stems decoded`);
-
-    // Autoplay policy: a context created before any user gesture starts
-    // suspended, and nothing will sound until it is resumed from one. The menu
-    // is the first thing on screen, so the first click anywhere does it.
+    // Autoplay policy: nothing sounds before the player's first gesture. The
+    // menu is the first thing on screen, so the first click anywhere starts
+    // whatever should already be playing.
     const wake = (): void => {
       void ctx.resume();
+      const deck = this.decks[this.active];
+      if (deck.track && deck.audio.paused) void deck.audio.play().catch(() => {});
     };
     window.addEventListener("pointerdown", wake, { once: true });
     window.addEventListener("keydown", wake, { once: true });
@@ -122,71 +118,44 @@ class MusicPlayer {
     window.addEventListener("blur", () => this.applyMaster(0.4));
     window.addEventListener("focus", () => this.applyMaster(0.4));
 
-    this.ready = true;
-  }
-
-  /** Switch between the menu piece, the match mix, and silence. */
-  scene(next: Scene): void {
-    if (!this.ctx || !this.master || this.current === next) return;
-    this.current = next;
-
-    const ctx = this.ctx;
-    void ctx.resume();
-
-    for (const [, voice] of this.voices) {
-      ramp(voice.gain.gain, 0, SCENE_FADE, ctx);
-      // Stopped rather than left running: an AudioBufferSourceNode at zero gain
-      // still costs its decode and its loop bookkeeping for the life of the
-      // process, and a player who bounces between menu and match a dozen times
-      // would accumulate all of them.
-      voice.source.stop(ctx.currentTime + SCENE_FADE + 0.1);
-    }
-    this.voices = new Map();
-
-    if (next === "silent") return;
-
-    const names: readonly string[] = next === "menu" ? ["menu"] : STEMS;
-    // One start time for all of them. This is the whole reason the stems stay
-    // in phase with each other.
-    const at = ctx.currentTime + 0.06;
-
-    for (const name of names) {
-      const decoded = this.decoded.get(name);
-      if (!decoded) continue;
-
-      const source = ctx.createBufferSource();
-      source.buffer = decoded;
-      source.loop = true;
-
-      const gain = ctx.createGain();
-      // The bed and the menu come straight up; the reactive layers start silent
-      // and are brought in by `intensity`.
-      const target = name === "bed" || name === "menu" ? 1 : 0;
-      gain.gain.value = 0;
-      source.connect(gain).connect(this.master);
-      source.start(at);
-      ramp(gain.gain, target, SCENE_FADE, ctx);
-
-      this.voices.set(name, { source, gain });
-    }
+    if (this.slot) this.play(this.slot, this.race);
   }
 
   /**
-   * Where the mix sits, from what is happening in the match.
+   * Play from a slot. `race` is the local player's race in a match, and null
+   * elsewhere.
    *
-   * `tension` brings in the machinery and then the guitar; `peril` brings in the
-   * dissonant layer underneath everything. Both are 0..1 and are expected to
-   * move slowly -- see `MusicDirector`, which is what smooths them.
+   * Staying in a slot, or moving to one whose tracks include the one playing,
+   * changes nothing audible: a lobby that falls back to the main menu's music
+   * does not restart it, and neither does a battle that ends in a mood with the
+   * same song.
    */
-  intensity(tension: number, peril: number): void {
-    if (!this.ctx || this.current !== "match") return;
-    const ctx = this.ctx;
+  play(slot: Slot, race: string | null = null): void {
+    if (this.slot === slot && this.race === race) return;
+    this.slot = slot;
+    this.race = race;
+    if (!this.ctx) return;
 
-    // A floor under the pulse, so a quiet match still has a heartbeat. Without
-    // it the opening minutes are a drone and nothing else.
-    set(this.voices.get("pulse"), 0.25 + 0.75 * clamp01(tension), ctx);
-    set(this.voices.get("lead"), clamp01(tension), ctx);
-    set(this.voices.get("dread"), clamp01(peril), ctx);
+    const tracks = tracksFor(this.config, slot, race);
+    this.playlist = this.config.shuffle ? shuffled(tracks) : tracks;
+    const current = this.decks[this.active].track;
+    if (current && tracks.includes(current)) return;
+    this.start(this.playlist[0] ?? null);
+  }
+
+  /** When a match's mood moves, as configured. */
+  get moods(): MusicConfig["moods"] {
+    return this.config.moods;
+  }
+
+  /** The slot being played from, for diagnostics. */
+  get currentSlot(): Slot | null {
+    return this.slot;
+  }
+
+  /** The file playing, for diagnostics. */
+  get currentFile(): string | null {
+    return this.decks[this.active]?.track?.file ?? null;
   }
 
   get volume(): number {
@@ -213,6 +182,60 @@ class MusicPlayer {
     return this.muted;
   }
 
+  /** The track after the one that just ended, from the same slot. */
+  private next(): void {
+    const current = this.decks[this.active].track;
+    if (this.playlist.length === 0) return;
+    const at = current ? this.playlist.indexOf(current) : -1;
+    let following = this.playlist[(at + 1) % this.playlist.length];
+    // A reshuffle at the end of the list, never repeating the song just heard
+    // unless it is the only one.
+    if (this.config.shuffle && at === this.playlist.length - 1 && this.playlist.length > 1) {
+      this.playlist = shuffled(this.playlist);
+      if (this.playlist[0] === current) this.playlist.push(this.playlist.shift()!);
+      following = this.playlist[0];
+    }
+    this.start(following, following === current);
+  }
+
+  /** Fade the playing deck out and `track` in on the other one. */
+  private start(track: Track | null, restart = false): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const fade = this.config.crossfade;
+    const outgoing = this.decks[this.active];
+
+    if (restart && track && outgoing.track === track) {
+      outgoing.audio.currentTime = 0;
+      void outgoing.audio.play().catch(() => {});
+      return;
+    }
+
+    ramp(outgoing.gain.gain, 0, fade, ctx);
+    const leaving = outgoing.audio;
+    const left = outgoing.track;
+    setTimeout(() => {
+      // Only if nothing has been started on this deck since.
+      if (outgoing.track === left && this.decks[this.active] !== outgoing) leaving.pause();
+    }, fade * 1000 + 100);
+
+    if (!track) {
+      outgoing.track = null;
+      return;
+    }
+
+    this.active = 1 - this.active;
+    const incoming = this.decks[this.active];
+    incoming.track = track;
+    incoming.audio.src = this.urls.get(track.file)!;
+    incoming.audio.currentTime = 0;
+    incoming.gain.gain.cancelScheduledValues(ctx.currentTime);
+    incoming.gain.gain.setValueAtTime(0, ctx.currentTime);
+    ramp(incoming.gain.gain, track.volume, fade, ctx);
+    // Rejected before the first gesture; `wake` starts it then.
+    void incoming.audio.play().catch(() => {});
+  }
+
   private applyMaster(seconds: number): void {
     if (!this.ctx || !this.master) return;
     const quiet = this.muted || !document.hasFocus();
@@ -220,12 +243,13 @@ class MusicPlayer {
   }
 }
 
-function set(
-  voice: { gain: GainNode } | undefined,
-  value: number,
-  ctx: AudioContext,
-): void {
-  if (voice) ramp(voice.gain.gain, value, MIX_FADE, ctx);
+function shuffled<T>(items: readonly T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 /**
@@ -234,87 +258,13 @@ function set(
  * `cancelScheduledValues` alone leaves the parameter wherever the previous ramp
  * had reached but keeps its *old* target as the ramp's start point, which makes
  * a new ramp jump. Holding the current value first is what makes repeated calls
- * -- which `intensity` does constantly -- smooth rather than steppy.
+ * smooth rather than steppy.
  */
 function ramp(param: AudioParam, to: number, seconds: number, ctx: AudioContext): void {
   const now = ctx.currentTime;
   param.cancelScheduledValues(now);
   param.setValueAtTime(param.value, now);
-  param.linearRampToValueAtTime(to, now + seconds);
-}
-
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
-
-/**
- * Turns what happened in the simulation into two numbers for the mix.
- *
- * Both decay continuously and are pushed up by events, so the music leads
- * slightly and trails a long way -- a fight that ends does not take the drums
- * with it immediately, which is what makes the score feel like it is reacting
- * to a battle rather than to a frame.
- *
- * Reads events only; it never touches simulation state and is not part of any
- * hash. Two players can run entirely different music and still agree on the
- * match -- which is also why this can safely be skipped, muted or rewritten
- * without a thought for the netcode.
- */
-export class MusicDirector {
-  private tension = 0;
-  private peril = 0;
-
-  private readonly localPlayer: number;
-
-  constructor(localPlayer: number) {
-    this.localPlayer = localPlayer;
-  }
-
-  /** Call from the session's after-tick hook, while `world.events` is current. */
-  ingest(world: World): void {
-    const e = world.entities;
-    const ownerOf = (id: number): number => {
-      const i = e.indexOfLive(id);
-      return i < 0 ? -1 : e.owner[i];
-    };
-
-    for (const event of world.events.all) {
-      switch (event.kind) {
-        // Anything involving this player's units, in either direction -- being
-        // shot at and shooting are both reasons for the music to pick up.
-        case EV_SHOT: {
-          const shooter = ownerOf(event.shooter);
-          const target = ownerOf(event.target);
-          if (shooter !== this.localPlayer && target !== this.localPlayer) break;
-          this.tension = Math.min(1, this.tension + 0.05);
-          if (event.lethal && target === this.localPlayer) {
-            this.peril = Math.min(1, this.peril + 0.05);
-          }
-          break;
-        }
-
-        // Losing things is what a losing match feels like.
-        case EV_DEATH:
-          if (event.owner === this.localPlayer) {
-            this.peril = Math.min(1, this.peril + 0.12);
-          }
-          break;
-
-        default:
-          break;
-      }
-    }
-  }
-
-  /** Call once per tick with elapsed milliseconds. */
-  update(deltaMs: number): void {
-    const dt = Math.min(0.25, deltaMs / 1000);
-    // Half-lives of roughly 6 and 25 seconds. Peril outlasts tension by a long
-    // way on purpose: a lost expansion should colour the next minute.
-    this.tension *= Math.pow(0.5, dt / 6);
-    this.peril *= Math.pow(0.5, dt / 25);
-    music.intensity(this.tension, this.peril);
-  }
+  param.linearRampToValueAtTime(to, now + Math.max(0.01, seconds));
 }
 
 /** The one player, for the life of the process. */

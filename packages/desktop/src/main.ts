@@ -36,9 +36,9 @@ const CLIENT_ROOT = normalize(join(here, "../../client/dist"));
  * Chromium refuses `fetch` on a file URL. Everything the renderer loads through
  * `fetch` -- decoded audio, and every `.glb` model through three.js's loader --
  * therefore worked in the dev server and failed in the shipped game, which is
- * the worst shape a bug can have. The soundtrack worked around it by being
- * inlined into the bundle as data URLs; models with textures are megabytes each
- * and cannot.
+ * the worst shape a bug can have. Inlining files into the bundle as data URLs
+ * works around it for small ones; models with textures are megabytes each and
+ * cannot.
  *
  * A privileged custom scheme is an ordinary origin as far as the page is
  * concerned: `fetch` works, relative URLs resolve, and nothing in the renderer
@@ -49,7 +49,10 @@ const CLIENT_ROOT = normalize(join(here, "../../client/dist"));
  */
 const SCHEME = "app";
 protocol.registerSchemesAsPrivileged([
-  { scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  // `stream`, so `<audio>` can play the soundtrack straight off the scheme: a
+  // media element reads a file in ranges as it plays, which a scheme has to be
+  // allowed to answer.
+  { scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
 
 /**

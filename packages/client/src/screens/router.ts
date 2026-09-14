@@ -17,6 +17,7 @@ import {
   type MatchConfig,
   type SlotKind,
 } from "../match.js";
+import { music } from "../audio/music.js";
 import { ReplaySession } from "../replay-session.js";
 import { showMenu, showMultiplayerMenu } from "./menu.js";
 import { showJoin } from "./join.js";
@@ -55,6 +56,7 @@ export interface Launch {
 /** Walk the menus until there is a match to run. */
 export async function chooseMatch(): Promise<Launch> {
   for (;;) {
+    music.play("menu.main");
     switch (await showMenu()) {
       case "skirmish": {
         const launch = await skirmish();
@@ -81,6 +83,7 @@ export async function chooseMatch(): Promise<Launch> {
 
 async function multiplayer(): Promise<Launch | null> {
   for (;;) {
+    music.play("menu.multiplayer");
     switch (await showMultiplayerMenu()) {
       case "host": {
         const launch = await hostGame();
@@ -103,6 +106,7 @@ async function multiplayer(): Promise<Launch | null> {
 // ---------------------------------------------------------------------------
 
 function skirmish(): Promise<Launch | null> {
+  music.play("menu.skirmish");
   return new Promise((resolve) => {
     let config = defaultConfig(playerName());
 
@@ -156,6 +160,7 @@ function skirmish(): Promise<Launch | null> {
 // ---------------------------------------------------------------------------
 
 function hostGame(): Promise<Launch | null> {
+  music.play("menu.lobby");
   return new Promise((resolve) => {
     // Captured once: a browser has no bridge at all, and the menu does not
     // offer this there. Narrowing here keeps every use below honest.
@@ -268,6 +273,7 @@ interface Joined {
 }
 
 async function joinGame(): Promise<Launch | null> {
+  music.play("menu.join");
   const token = playerToken();
   const name = playerName();
 
@@ -344,6 +350,7 @@ function openLobby(
 
 /** Sit in the host's lobby until it starts, or until we leave. */
 function waitInLobby(joined: Joined, token: string, name: string): Promise<Launch | null> {
+  music.play("menu.lobby");
   return new Promise((resolve) => {
     const { address, transport, guest } = joined;
 
@@ -400,6 +407,7 @@ function waitInLobby(joined: Joined, token: string, name: string): Promise<Launc
 // ---------------------------------------------------------------------------
 
 function watchReplay(): Promise<Launch | null> {
+  music.play("menu.replays");
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";

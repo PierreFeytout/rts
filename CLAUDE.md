@@ -5,6 +5,12 @@ multiplayer, shipped as an Electron desktop app. The setting and art direction a
 in UNIVERSE.md; the model pipeline and its rules are in
 packages/client/assets/models/README.md.
 
+## Music
+
+The soundtrack is the project's own recordings, never generated: files in
+packages/client/assets/music, assigned to menus, match moods and races by
+`music.json` there -- its README documents the format.
+
 ## 3D models: the quality bar
 
 **Every unit and building model must be at least as detailed as the Conscript**

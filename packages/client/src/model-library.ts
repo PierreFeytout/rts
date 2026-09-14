@@ -20,7 +20,7 @@ import { SINGLE, isSkinned, toSkinnedParts, type AnimationBake, type SquadSlot }
  * build time; none are required. Whatever has no file is drawn as its built-in
  * silhouette, so the game is always complete and art arrives one unit at a time.
  *
- * Loading is at startup, alongside the terrain textures and the soundtrack,
+ * Loading is at startup, alongside the terrain textures,
  * rather than when a match begins. Parsing models takes long enough to be a
  * visible hitch, and the moment it would otherwise land is when the player has
  * just pressed Start.
