@@ -15,6 +15,7 @@ import * as THREE from "three";
 import { bamToThreeY, simToWorld } from "./coords.js";
 import type { Model, ModelLibrary } from "./model-library.js";
 import { teamAttributes } from "./model-parts.js";
+import { aimFrame, aimYaw, turnToward } from "./aim.js";
 import { frameAt, type AnimationBake, type BakedClip } from "./skinned-parts.js";
 import { NEUTRAL_COLOUR, VENT_COLOUR, teamColour } from "./palette.js";
 
@@ -69,6 +70,13 @@ const CLIP_NAMES = ["idle", "walk", "fire", "produce", "release", "build"];
  * visibly walking when its first shot lands.
  */
 const BLEND_SECONDS = 0.18;
+
+/** How fast a turret traverses, in radians a second. Heavy, but never lagging a shot by much. */
+const TRAVERSE_RATE = 3;
+/** How long a shot's recoil takes to settle back into battery. */
+const RECOIL_SECONDS = 0.35;
+/** A turret with nothing to shoot sweeps this far either side of where it last aimed. */
+const SCAN_SWEEP = 0.55;
 
 /**
  * The clip a model actually has for what a unit wants to do.
@@ -148,6 +156,9 @@ export class WorldRenderer {
   private readonly lastShot = new Float64Array(MAX_ENTITIES).fill(-Infinity);
   /** When each structure last let out something it made, on the same clock. */
   private readonly lastRelease = new Float64Array(MAX_ENTITIES).fill(-Infinity);
+  /** Where each turret points, and the heading its idle sweep is centred on. See aim.ts. */
+  private readonly aimYaw = new Float32Array(MAX_ENTITIES);
+  private readonly aimHome = new Float32Array(MAX_ENTITIES);
   private lastFrame = -1;
   /**
    * Camera orientation, baked into every health bar instance.
@@ -295,6 +306,7 @@ export class WorldRenderer {
           if (building) light *= staged ? 0.75 : 0.5;
           if (animation) {
             this.animateStructure(i, e.idAt(i), animation, building ? progress : -1, e.queueLen[i] > 0, dt, now);
+            if (!building && animation.clips.has("aim")) this.traverse(world, i, dt, now);
           }
         } else {
           this.colour.setHex(teamColour(owner));
@@ -307,7 +319,14 @@ export class WorldRenderer {
           batch.team.setXYZ(n, this.colour.r, this.colour.g, this.colour.b);
           batch.shade.setX(n, light);
           const animation = batch.model.animation;
-          if (batch.animation && animation) {
+          const aim = animation?.clips.get("aim");
+          const kick = animation?.clips.get("aim_fire") ?? aim;
+          if (batch.animation && animation && aim && kick && this.animClip[i] !== BUILD) {
+            // A turret: its heading picks the frame, and a shot blends in the
+            // recoiled pose at the same heading.
+            const recoil = Math.max(0, 1 - (now - this.lastShot[i]) / RECOIL_SECONDS);
+            batch.animation.setXYZ(n, aimFrame(aim, this.aimYaw[i]), aimFrame(kick, this.aimYaw[i]), recoil);
+          } else if (batch.animation && animation) {
             const clip = clipFor(animation, this.animClip[i]);
             const prev = clipFor(animation, this.animPrev[i]);
             batch.animation.setXYZ(
@@ -391,6 +410,28 @@ export class WorldRenderer {
   }
 
   /**
+   * Turn a turret toward what it is shooting at, or sweep while it waits.
+   *
+   * Only for models with an `aim` clip (see aim.ts); the heading is read back
+   * when the instance is written. The target is whatever the simulation's
+   * combat system is holding in `targetId`, which for a structure is only
+   * ever something it means to shoot.
+   */
+  private traverse(world: World, i: number, dt: number, now: number): void {
+    const e = world.entities;
+    const ti = e.indexOfLive(e.targetId[i]);
+    let desired: number;
+    if (ti >= 0 && ti !== i) {
+      desired = aimYaw(e.posX[ti] - e.posX[i], e.posY[ti] - e.posY[i]);
+      this.aimHome[i] = desired;
+    } else {
+      // Offset per slot, so a line of guns does not sweep in unison.
+      desired = this.aimHome[i] + Math.sin(now * 0.45 + i * 1.7) * SCAN_SWEEP;
+    }
+    this.aimYaw[i] = turnToward(this.aimYaw[i], desired, TRAVERSE_RATE * dt);
+  }
+
+  /**
    * Decide which clip a structure should be playing, and move it along.
    *
    * Construction is not played but scrubbed: `progress` (0 to 1 while the site
@@ -417,21 +458,33 @@ export class WorldRenderer {
       this.animPrevTime[i] = 0;
       this.animBlend[i] = 0;
       this.lastRelease[i] = -Infinity;
+      this.lastShot[i] = -Infinity;
+      this.aimYaw[i] = 0;
+      this.aimHome[i] = 0;
     }
 
     const build = bake.clips.get("build");
     const release = bake.clips.get("release");
+    const fire = bake.clips.get("fire");
     const releasing = release !== undefined && now - this.lastRelease[i] < release.duration;
-    const wanted = progress >= 0 && build ? BUILD : releasing ? RELEASE : producing && bake.clips.has("produce") ? PRODUCE : IDLE;
+    const firing = fire !== undefined && now - this.lastShot[i] < fire.duration;
+    const wanted =
+      progress >= 0 && build ? BUILD
+      : firing ? FIRE
+      : releasing ? RELEASE
+      : producing && bake.clips.has("produce") ? PRODUCE
+      : IDLE;
 
     if (wanted !== this.animClip[i]) {
       this.animPrev[i] = this.animClip[i];
       this.animPrevTime[i] = this.animTime[i];
       this.animBlend[i] = 1;
       this.animClip[i] = wanted;
-      if (wanted === RELEASE) this.animTime[i] = 0;
+      if (wanted === RELEASE || wanted === FIRE) this.animTime[i] = 0;
     } else if (wanted === RELEASE && now - this.lastRelease[i] < this.animTime[i]) {
       // Another unit out before the doors finished closing: open them again.
+      this.animTime[i] = 0;
+    } else if (wanted === FIRE && now - this.lastShot[i] < this.animTime[i]) {
       this.animTime[i] = 0;
     }
 

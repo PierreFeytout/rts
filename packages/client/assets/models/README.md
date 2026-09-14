@@ -228,6 +228,19 @@ buys speed with a few rules:
   | `produce` | anything in its production queue | looped |
   | `release` | each time a unit it made comes out | once, then back to `produce` or `idle` |
 
+  A structure that attacks also has, by what it is:
+
+  | Clip | When | Plays |
+  |---|---|---|
+  | `aim` | a turret, standing | **chosen by heading**, not played: one full turn of the turret, anticlockwise seen from above, starting facing +X. The renderer shows the frame for the direction to its target, traversing at a limited rate, and sweeps slowly either side of its last heading when it has none |
+  | `aim_fire` | each shot | the same turn with the barrel recoiled, blended in at the same heading for the shot's kick. Same length as `aim`, and differing from it only by the recoil |
+  | `fire` | each shot, for anything that attacks but does not aim | once, then back to what it was doing |
+
+  `aim` is how a turret turns independently of its base, which a clip shared by
+  every copy of a model otherwise cannot do: every turret on the map is still
+  one draw call (packages/client/src/aim.ts). Key it every 30 degrees or so,
+  linear; `scripts/models/gun_nest.py` is the example.
+
   A structure with a `build` clip is drawn at full size throughout its
   construction, and the clip is the whole of how progress is shown; one without
   rises out of the ground as before. `scripts/models/bastion.py` is the
@@ -357,10 +370,9 @@ await g.capture("name", 1400);        // writes .captures/name.png
 
 ## Not supported yet
 
-- **Rigid-part animation without a skeleton** -- a turret that turns to face its
-  target independently of its hull. Clips play the same for every copy of a
-  model, so nothing can aim a bone per unit; for now a turret faces where its
-  hull does.
+- **A unit's turret turning independently of its hull.** Structures can, with an
+  `aim` clip (see above); units cannot yet, since their clips are already
+  chosen by what the unit is doing and the renderer blends only two frames.
 - **Death animations.** A unit that dies is removed from the world at once, and
   there is not yet anything to keep drawing its corpse.
 - Multiple materials on one mesh. Split the mesh per material, or let the

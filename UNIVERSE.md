@@ -265,9 +265,9 @@ technical rules). The silhouette line is what has to survive at playing zoom,
 where a tile is about 25 pixels.
 
 Clips: `build` is scrubbed by construction progress, `idle` loops, `produce`
-loops while anything is queued, `release` plays as a unit comes out. The game
-does not yet play `fire` on structures, nor aim a turret independently of its
-base -- see the notes on the two gun buildings.
+loops while anything is queued, `release` plays as a unit comes out. A
+structure that attacks either aims -- `aim` and `aim_fire`, a turret turning
+to face its target -- or plays `fire` on every shot.
 
 **Units come out on the +X side**, from the middle of that face, so every
 producing structure puts its door there -- whatever that door is. From there
@@ -369,12 +369,10 @@ their colour while the building is selected.
   (-Y); ammunition lockers and a ladder into the ring (+X).
 - **Paint:** the turret's shield plate and mantlet.
 - **Clips:** `build` -- the mount is lowered into its ring, the ring's plates
-  hinge up and lock, the barrel elevates into position. `idle` -- a slow scan
-  back and forth, coils glowing low.
-- **Not yet possible:** the turret cannot turn to face what it shoots, and
-  structures do not play `fire`. The second is a small renderer change; the
-  first needs per-instance bone aiming. Until then the barrel's `idle` scan is
-  the whole of its animation.
+  hinge up and lock, the barrel elevates into position. `aim` and `aim_fire`
+  -- the mount traverses to face what it shoots, sweeps slowly when it has
+  nothing, and the barrel kicks back on every shot.
+  **Modelled** -- `scripts/models/gun_nest.py`.
 
 ### The Verdigris
 
@@ -473,11 +471,9 @@ is modelled.
   the knot where the tension is held.
 - **Colour (bloom):** blooms along the spine's outer curve.
 - **Clips:** `build` -- the base surfaces, the spine uncoils upward and bends
-  back under tension, the shards grow at the tip. `idle` -- the spine quivers,
-  held.
-- **Not yet possible:** as for the Gun Nest, it cannot aim and does not play
-  `fire`; a flick of the spine on every shot is the obvious clip once
-  structures play `fire`.
+  back under tension, the shards grow at the tip. `aim` and `aim_fire` -- the
+  spine swings round its base to bear on the target, and flicks forward as it
+  throws.
 
 ---
 
