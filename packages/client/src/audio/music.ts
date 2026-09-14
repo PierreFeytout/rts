@@ -1,4 +1,5 @@
 import { defaultContent } from "@rts/content";
+import { Level, audioContext, ramp, whenFocusChanges } from "./context.js";
 import { EMPTY_CONFIG, parseMusicConfig, tracksFor, type MusicConfig, type Slot, type Track } from "./music-config.js";
 
 /**
@@ -26,8 +27,6 @@ const FILES = import.meta.glob<string>("../../assets/music/*.{mp3,ogg,wav,m4a,fl
 /** The configuration, if there is one. A missing file is silence, not an error. */
 const CONFIG_FILES = import.meta.glob<unknown>("../../assets/music/music.json", { eager: true, import: "default" });
 
-const VOLUME_KEY = "rts.musicVolume";
-
 interface Deck {
   audio: HTMLAudioElement;
   gain: GainNode;
@@ -48,17 +47,7 @@ class MusicPlayer {
   /** What the current slot may play, in the order to play it. */
   private playlist: Track[] = [];
 
-  private level = 0.6;
-  private muted = false;
-
-  constructor() {
-    try {
-      const stored = localStorage.getItem(VOLUME_KEY);
-      if (stored !== null) this.level = Math.max(0, Math.min(1, Number(stored)));
-    } catch {
-      // Blocked site data. A default volume is better than refusing to play.
-    }
-  }
+  private readonly level = new Level("rts.musicVolume", 0.6);
 
   /** Read the configuration and open the audio context. Called once at startup. */
   async load(): Promise<void> {
@@ -74,14 +63,10 @@ class MusicPlayer {
     }
     console.info(`[rts] music: ${this.config.tracks.length} tracks configured, ${this.urls.size} files`);
 
-    const Ctor: typeof AudioContext =
-      window.AudioContext ??
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!Ctor) return;
-
-    const ctx = new Ctor();
+    const ctx = audioContext();
+    if (!ctx) return;
     const master = ctx.createGain();
-    master.gain.value = this.muted ? 0 : this.level;
+    master.gain.value = this.level.effective;
     master.connect(ctx.destination);
     this.ctx = ctx;
     this.master = master;
@@ -105,7 +90,6 @@ class MusicPlayer {
     // menu is the first thing on screen, so the first click anywhere starts
     // whatever should already be playing.
     const wake = (): void => {
-      void ctx.resume();
       const deck = this.decks[this.active];
       if (deck.track && deck.audio.paused) void deck.audio.play().catch(() => {});
     };
@@ -115,8 +99,7 @@ class MusicPlayer {
     // Quiet when the game is not the window in front. The simulation keeps
     // running -- the host is the arbiter and must not stall -- but there is no
     // reason for a background window to keep making noise.
-    window.addEventListener("blur", () => this.applyMaster(0.4));
-    window.addEventListener("focus", () => this.applyMaster(0.4));
+    whenFocusChanges(() => this.applyMaster(0.4));
 
     if (this.slot) this.play(this.slot, this.race);
   }
@@ -159,27 +142,22 @@ class MusicPlayer {
   }
 
   get volume(): number {
-    return this.level;
+    return this.level.value;
   }
 
   setVolume(value: number): void {
-    this.level = Math.max(0, Math.min(1, value));
-    try {
-      localStorage.setItem(VOLUME_KEY, String(this.level));
-    } catch {
-      // See the constructor. It applies to this session either way.
-    }
+    this.level.set(value);
     this.applyMaster(0.12);
   }
 
   get isMuted(): boolean {
-    return this.muted;
+    return this.level.muted;
   }
 
   toggleMute(): boolean {
-    this.muted = !this.muted;
+    this.level.muted = !this.level.muted;
     this.applyMaster(0.12);
-    return this.muted;
+    return this.level.muted;
   }
 
   /** The track after the one that just ended, from the same slot. */
@@ -238,8 +216,7 @@ class MusicPlayer {
 
   private applyMaster(seconds: number): void {
     if (!this.ctx || !this.master) return;
-    const quiet = this.muted || !document.hasFocus();
-    ramp(this.master.gain, quiet ? 0 : this.level, seconds, this.ctx);
+    ramp(this.master.gain, this.level.effective, seconds, this.ctx);
   }
 }
 
@@ -250,21 +227,6 @@ function shuffled<T>(items: readonly T[]): T[] {
     [out[i], out[j]] = [out[j], out[i]];
   }
   return out;
-}
-
-/**
- * Move a parameter, cancelling whatever it was already doing.
- *
- * `cancelScheduledValues` alone leaves the parameter wherever the previous ramp
- * had reached but keeps its *old* target as the ramp's start point, which makes
- * a new ramp jump. Holding the current value first is what makes repeated calls
- * smooth rather than steppy.
- */
-function ramp(param: AudioParam, to: number, seconds: number, ctx: AudioContext): void {
-  const now = ctx.currentTime;
-  param.cancelScheduledValues(now);
-  param.setValueAtTime(param.value, now);
-  param.linearRampToValueAtTime(to, now + Math.max(0.01, seconds));
 }
 
 /** The one player, for the life of the process. */

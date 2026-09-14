@@ -1,4 +1,5 @@
 import { music } from "../audio/music.js";
+import { sfx } from "../audio/sfx.js";
 import { MAX_NAME, playerName, setPlayerName } from "../identity.js";
 import { desktop } from "../desktop.js";
 import { escapeHtml, screen } from "../ui.js";
@@ -99,7 +100,12 @@ function choose<T extends string>(options: ChooseOptions<T>): Promise<T> {
           `<div class="rts-row"><input id="menu-volume" type="range" min="0" max="100" ` +
           `step="1" value="${Math.round(music.volume * 100)}" style="flex:1" />` +
           `<button class="quiet" id="menu-mute" style="padding:6px 12px;min-width:74px">` +
-          `${music.isMuted ? "unmute" : "mute"}</button></div></label><hr />`
+          `${music.isMuted ? "unmute" : "mute"}</button></div></label>` +
+          `<label class="rts-field"><span>effects</span>` +
+          `<div class="rts-row"><input id="menu-sfx-volume" type="range" min="0" max="100" ` +
+          `step="1" value="${Math.round(sfx.volume * 100)}" style="flex:1" />` +
+          `<button class="quiet" id="menu-sfx-mute" style="padding:6px 12px;min-width:74px">` +
+          `${sfx.isMuted ? "unmute" : "mute"}</button></div></label><hr />`
         : "") +
       options.entries
         .map(
@@ -121,6 +127,18 @@ function choose<T extends string>(options: ChooseOptions<T>): Promise<T> {
     if (mute) {
       mute.onclick = () => {
         mute.textContent = music.toggleMute() ? "unmute" : "mute";
+      };
+    }
+    const sfxVolume = panel.querySelector<HTMLInputElement>("#menu-sfx-volume");
+    const sfxMute = panel.querySelector<HTMLButtonElement>("#menu-sfx-mute");
+    if (sfxVolume) {
+      sfxVolume.oninput = () => sfx.setVolume(Number(sfxVolume.value) / 100);
+      // Let go of the slider and hear the level it is at.
+      sfxVolume.onchange = () => sfx.play(["ui.click"]);
+    }
+    if (sfxMute) {
+      sfxMute.onclick = () => {
+        sfxMute.textContent = sfx.toggleMute() ? "unmute" : "mute";
       };
     }
 

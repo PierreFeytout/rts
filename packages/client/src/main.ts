@@ -7,6 +7,7 @@ import {
   type Command,
 } from "@rts/sim";
 import { music } from "./audio/music.js";
+import { sfx } from "./audio/sfx.js";
 import { startGame, type RunningGame } from "./game.js";
 import { loadTerrain } from "./materials.js";
 import { loadModels } from "./model-library.js";
@@ -40,8 +41,14 @@ const [terrain, models] = await Promise.all([
   loadModels((typeId) => defaultContent.contentIdOf(typeId)),
 ]);
 void music.load().catch((error: unknown) => console.warn("[rts] no music:", error));
-// Which slot and which file, for checking a soundtrack configuration from the console.
-if (import.meta.env.DEV) window.__music = music;
+void sfx.load().catch((error: unknown) => console.warn("[rts] no sound effects:", error));
+// Every button anywhere -- menus, the command card -- clicks.
+document.addEventListener("pointerdown", (event) => {
+  if ((event.target as Element | null)?.closest?.("button:not([disabled])")) sfx.play(["ui.click"]);
+});
+// Which slot, which file, which effects are playing: for checking an audio
+// configuration from the console.
+if (import.meta.env.DEV) Object.assign(window, { __music: music, __sfx: sfx });
 
 for (;;) {
   const launch = await chooseMatch();
@@ -170,6 +177,7 @@ function cornerButton(
 declare global {
   interface Window {
     __music?: typeof music;
+    __sfx?: typeof sfx;
     __rts?: RunningGame & {
       isHost: boolean;
       localPlayer: number;

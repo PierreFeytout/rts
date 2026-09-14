@@ -4,8 +4,10 @@ import type { GuestSession, HostSession } from "@rts/netcode";
 import { TICK_HZ, TICK_MS, hashToString, type Command, type World } from "@rts/sim";
 import * as THREE from "three";
 import type { AiDriver } from "./ai/driver.js";
+import { MatchSounds } from "./audio/match-sounds.js";
 import { MoodTracker, moodSlot } from "./audio/mood.js";
 import { music } from "./audio/music.js";
+import { sfx } from "./audio/sfx.js";
 import { CameraControls } from "./camera-controls.js";
 import { ControlGroups } from "./control-groups.js";
 import { Effects } from "./effects.js";
@@ -167,13 +169,15 @@ export function startGame(options: GameOptions): RunningGame {
   const effects = new Effects(scene);
   const rallies = new RallyMarkers(scene);
   const fog = new FogRenderer(scene, mapTiles, localPlayer);
-  const selection = new Selection(world, rig, canvas, localPlayer, (command: Command) =>
-    session.submitLocal(command),
-  );
-  const hud = new Hud(world, localPlayer, selection, (command: Command) =>
-    session.submitLocal(command),
-    options.models,
-  );
+  const sounds = new MatchSounds(localPlayer);
+  // Every order the player gives is acknowledged, whichever part of the screen
+  // it came from.
+  const issue = (command: Command): void => {
+    sounds.order(command);
+    session.submitLocal(command);
+  };
+  const selection = new Selection(world, rig, canvas, localPlayer, issue);
+  const hud = new Hud(world, localPlayer, selection, issue, options.models);
   const groups = new ControlGroups(world, selection, rig, localPlayer);
   // Built after the HUD, because the console owns the bay it mounts into.
   const minimap = new Minimap(world, rig, localPlayer, hud.minimapBay);
@@ -213,6 +217,7 @@ export function startGame(options: GameOptions): RunningGame {
       // Shots, so a unit that fired plays its firing clip.
       units.ingest(w);
       hud.ingest(w);
+      sounds.ingest(w);
       mood.ingest(w);
       const current = mood.update(TICK_MS / 1000);
       // A guest's world arrives in a snapshot, so the race may only be known
@@ -329,6 +334,10 @@ export function startGame(options: GameOptions): RunningGame {
     fog.update(world);
     units.update(world, session.alpha, selection.selected, localPlayer);
     rallies.update(world, selection.selected, localPlayer, performance.now() / 1000);
+    // Heard from where the camera looks. The view height is how much of the map
+    // is on screen vertically; the ground it covers is a little more than that.
+    sfx.listen(rig.target.x, rig.target.z, rig.viewHeight * 0.75, SCREEN_RIGHT_X, SCREEN_RIGHT_Z);
+    sounds.select(world, selection.selected);
     effects.update(deltaSeconds);
     updateGhost();
     hud.update();
@@ -476,6 +485,13 @@ export function startGame(options: GameOptions): RunningGame {
     },
   };
 }
+
+/**
+ * The ground direction that points right on screen, for panning sounds. The
+ * isometric camera sits at +X, +Z and never turns, so this is fixed.
+ */
+const SCREEN_RIGHT_X = Math.SQRT1_2;
+const SCREEN_RIGHT_Z = -Math.SQRT1_2;
 
 /** Point the camera at the local player's units, or the map centre if it has none. */
 function centreOnPlayerUnits(
