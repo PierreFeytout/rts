@@ -51,6 +51,87 @@ export const FAMILIES = [
   "ui",
 ] as const;
 
+export type Family = (typeof FAMILIES)[number];
+
+/** Damage types by the simulation's number, as keys name them. */
+export const DAMAGE_NAMES = ["kinetic", "plasma", "explosive"] as const;
+/** Why an order was refused, as keys name it. */
+export const BLOCKED_NAMES = ["resources", "supply", "space", "queue"] as const;
+/** Orders, as keys name them. */
+export const ORDER_NAMES = ["move", "attack", "gather", "build", "train", "cancel", "rally", "stop", "hold"] as const;
+
+/** What each family is, for anyone assigning sounds to it. */
+export const FAMILY_INFO: Readonly<Record<Family, { label: string; when: string; general: readonly string[] }>> = {
+  shot: { label: "Shots", when: "something fires; heard at the shooter", general: DAMAGE_NAMES },
+  impact: { label: "Impacts", when: "a shot lands; heard at the target", general: DAMAGE_NAMES },
+  death: { label: "Deaths", when: "a unit or building is destroyed", general: ["unit", "building"] },
+  built: { label: "Buildings finished", when: "construction completes", general: [] },
+  trained: { label: "Units trained", when: "a unit comes out of its building", general: [] },
+  deposit: { label: "Deposits", when: "one of your workers drops off alloy", general: [] },
+  blocked: { label: "Refusals", when: "an order of yours is refused", general: BLOCKED_NAMES },
+  order: { label: "Orders", when: "you give an order", general: ORDER_NAMES },
+  select: { label: "Selection", when: "your selection changes", general: ["unit", "building"] },
+  ui: { label: "Interface", when: "a button is pressed", general: ["click"] },
+};
+
+/** The content a catalogue is built from: races, and what their types are. */
+export interface CatalogContent {
+  readonly races: readonly { readonly id: string; readonly name: string; readonly typeIds: readonly number[] }[];
+  readonly types: {
+    get(id: number): { readonly name: string; readonly kind: number; readonly abilities: number; readonly damageType: number };
+  };
+  contentIdOf(typeId: number): string;
+}
+
+export interface CatalogEntry {
+  readonly key: string;
+  readonly family: Family;
+  /** What it is, in words: "Conscript", "Ashen Directorate", "kinetic", "any". */
+  readonly label: string;
+  /** The keys the game asks for, in order, when this is what happened. Starts with `key`. */
+  readonly chain: readonly string[];
+}
+
+/**
+ * Every key the game can ask for, with the chain it falls back along.
+ *
+ * Built from content, so a unit added to a race appears here with no list to
+ * update. Within a family: the family itself, then its general kinds, then each
+ * race, then each unit or building the family applies to.
+ */
+export function soundCatalog(content: CatalogContent, canAttack: number, building: number): CatalogEntry[] {
+  const entries: CatalogEntry[] = [];
+  for (const family of FAMILIES) {
+    const info = FAMILY_INFO[family];
+    entries.push({ key: family, family, label: "any", chain: [family] });
+    for (const general of info.general) {
+      entries.push({ key: `${family}.${general}`, family, label: general, chain: [`${family}.${general}`, family] });
+    }
+    const perType = family === "shot" || family === "death" || family === "built" || family === "trained" || family === "select";
+    if (!perType) continue;
+
+    for (const race of content.races) {
+      entries.push({ key: `${family}.${race.id}`, family, label: race.name, chain: [`${family}.${race.id}`, family] });
+    }
+    for (const race of content.races) {
+      for (const id of race.typeIds) {
+        const type = content.types.get(id);
+        const isBuilding = type.kind === building;
+        if (family === "shot" && (type.abilities & canAttack) === 0) continue;
+        if (family === "built" && !isBuilding) continue;
+        if (family === "trained" && isBuilding) continue;
+        const general =
+          family === "shot" ? [DAMAGE_NAMES[type.damageType]]
+          : family === "death" || family === "select" ? [isBuilding ? "building" : "unit"]
+          : [];
+        const contentId = content.contentIdOf(id);
+        entries.push({ key: `${family}.${contentId}`, family, label: type.name, chain: keysFor(family, contentId, general) });
+      }
+    }
+  }
+  return entries;
+}
+
 /**
  * Read a configuration, keeping whatever is usable and saying what is not.
  * Never throws: a mistake costs its entry, with a warning naming it.

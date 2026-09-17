@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "rootDir": "src",
+    "outDir": "dist-types",
+    // Vite serves the tools; tsc here only typechecks the browser side.
+    "emitDeclarationOnly": true,
+    "paths": {
+      "@rts/sim": ["../sim/src/index.ts"],
+      "@rts/content": ["../content/src/index.ts"],
+      "@client/*": ["../client/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "references": [{ "path": "../sim" }, { "path": "../content" }, { "path": "../client" }]
+}

@@ -44,7 +44,7 @@ void music.load().catch((error: unknown) => console.warn("[rts] no music:", erro
 void sfx.load().catch((error: unknown) => console.warn("[rts] no sound effects:", error));
 // Every button anywhere -- menus, the command card -- clicks.
 document.addEventListener("pointerdown", (event) => {
-  if ((event.target as Element | null)?.closest?.("button:not([disabled])")) sfx.play(["ui.click"]);
+  if ((event.target as Element | null)?.closest?.("button:not([disabled])")) sfx.play(["ui.click", "ui"]);
 });
 // Which slot, which file, which effects are playing: for checking an audio
 // configuration from the console.

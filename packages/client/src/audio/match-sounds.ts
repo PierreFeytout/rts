@@ -27,7 +27,7 @@ import {
   type Fx,
   type World,
 } from "@rts/sim";
-import { keysFor } from "./sfx-config.js";
+import { DAMAGE_NAMES, keysFor, type BLOCKED_NAMES, type ORDER_NAMES } from "./sfx-config.js";
 import { sfx } from "./sfx.js";
 
 /**
@@ -42,14 +42,13 @@ import { sfx } from "./sfx.js";
  * Reads events and state only; nothing here is simulation state.
  */
 
-const DAMAGE = ["kinetic", "plasma", "explosive"];
-const BLOCKED: Record<number, string> = {
+const BLOCKED: Record<number, (typeof BLOCKED_NAMES)[number]> = {
   [BLOCKED_RESOURCES]: "resources",
   [BLOCKED_SUPPLY]: "supply",
   [BLOCKED_SPACE]: "space",
   [BLOCKED_QUEUE_FULL]: "queue",
 };
-const ORDERS: Record<number, string> = {
+const ORDERS: Record<number, (typeof ORDER_NAMES)[number]> = {
   [CMD_MOVE]: "move",
   [CMD_STOP]: "stop",
   [CMD_HOLD]: "hold",
@@ -78,7 +77,7 @@ export class MatchSounds {
         case EV_SHOT: {
           const i = e.indexOfLive(event.shooter);
           const type = i >= 0 ? world.types.get(e.typeId[i]) : null;
-          const damage = type ? [DAMAGE[type.damageType]] : [];
+          const damage = type ? [DAMAGE_NAMES[type.damageType]] : [];
           if (this.sees(world, event.fromX, event.fromY)) {
             sfx.play(keysFor("shot", type ? defaultContent.contentIdOf(type.id) : null, damage), at(event.fromX, event.fromY));
           }
@@ -103,7 +102,7 @@ export class MatchSounds {
           if (event.player === this.localPlayer) sfx.play(["deposit"], at(event.x, event.y));
           break;
         case EV_BLOCKED:
-          if (event.player === this.localPlayer) sfx.play(keysFor("blocked", null, [BLOCKED[event.reason] ?? "other"]));
+          if (event.player === this.localPlayer) sfx.play(keysFor("blocked", null, BLOCKED[event.reason] ? [BLOCKED[event.reason]] : []));
           break;
         default:
           break;

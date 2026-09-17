@@ -37,7 +37,9 @@ class SoundEffects {
   private readonly buffers = new Map<string, AudioBuffer>();
   private readonly voices = new Set<Voice>();
   private readonly lastStart = new Map<string, number>();
-  private readonly level = new Level("rts.sfxVolume", 0.8);
+  // Half, by default: effects come in bursts, and a battle at full level buries
+  // the music and tires the ear within a minute.
+  private readonly level = new Level("rts.sfxVolume", 0.5);
 
   // The listener: where the camera looks, how much of the map it shows, and
   // which way is right on screen.

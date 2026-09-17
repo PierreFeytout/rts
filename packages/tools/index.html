@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>RTS tools</title>
+    <link rel="stylesheet" href="/src/tools.css" />
+    <style>
+      main { max-width: 760px; margin: 48px auto; padding: 0 20px; }
+      h1 { font-size: 20px; color: var(--flame); }
+      p.sub { margin: 4px 0 28px; color: var(--muted); }
+      a.tool { display: block; padding: 14px 16px; margin: 0 0 10px; background: var(--ash); border: 1px solid var(--line); border-radius: 6px; text-decoration: none; }
+      a.tool:hover { border-color: var(--ember); }
+      a.tool h2 { font-size: 14px; color: var(--flame); }
+      a.tool p { margin: 4px 0 0; color: var(--bone); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>RTS tools</h1>
+      <p class="sub">Development tools for the game's content. They read and write the project's files directly;
+        the game's dev server picks up what they save.</p>
+
+      <a class="tool" href="/sfx.html">
+        <h2>Sound effects</h2>
+        <p>Browse the sound library, listen, and assign sounds to what happens in a match. Writes
+          packages/client/assets/sfx.</p>
+      </a>
+    </main>
+  </body>
+</html>

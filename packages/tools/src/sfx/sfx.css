@@ -1,0 +1,242 @@
+body {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+header#top {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--ash);
+}
+
+header#top h1 {
+  font-size: 15px;
+  color: var(--flame);
+}
+
+header#top label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+header#top .status {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+header#top .status.dirty {
+  color: var(--flame);
+}
+
+header#top .status.error {
+  color: var(--warning);
+}
+
+#columns {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(300px, 1.15fr) minmax(280px, 1fr) minmax(320px, 1fr);
+  min-height: 0;
+}
+
+#columns > section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+}
+
+.panel-head {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
+}
+
+.panel-head h2 {
+  font-size: 13px;
+}
+
+.panel-head .row {
+  display: flex;
+  gap: 6px;
+}
+
+.panel-head select {
+  background: var(--ash);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0 24px;
+}
+
+.folder {
+  padding: 8px 12px 2px;
+  color: var(--dust);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.sound {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 12px;
+}
+
+.sound:hover {
+  background: var(--ash);
+}
+
+.sound.playing .name {
+  color: var(--flame);
+}
+
+.sound .name {
+  flex: 1;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sound .facts {
+  color: var(--muted);
+  font-size: 11px;
+  min-width: 96px;
+  text-align: right;
+}
+
+.sound .used {
+  color: var(--ember);
+  font-size: 11px;
+  min-width: 16px;
+}
+
+details.family > summary {
+  padding: 8px 12px 4px;
+  cursor: pointer;
+  list-style: none;
+}
+
+details.family > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.family > summary h3 {
+  display: inline;
+  font-size: 13px;
+}
+
+details.family > summary .when {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.action {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 12px 3px 24px;
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--ash);
+}
+
+.action.selected {
+  background: var(--iron);
+  box-shadow: inset 3px 0 0 var(--ember);
+}
+
+.action .label small {
+  color: var(--dust);
+  margin-left: 6px;
+}
+
+.action .state {
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.state.own {
+  color: var(--flame);
+}
+
+.state.inherits {
+  color: var(--muted);
+}
+
+.state.silent {
+  color: var(--dust);
+}
+
+#editor .body {
+  padding: 12px 14px;
+  overflow-y: auto;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+#editor .key {
+  color: var(--muted);
+}
+
+#editor .chain {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+#editor .chain button.active {
+  border-color: var(--ember);
+  color: var(--flame);
+}
+
+#editor .files .sound {
+  padding: 2px 0;
+}
+
+#editor .setting {
+  display: grid;
+  grid-template-columns: 70px 1fr 56px;
+  align-items: center;
+  gap: 8px;
+}
+
+#editor .setting output {
+  text-align: right;
+}
+
+#editor .buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+#editor p {
+  margin: 0;
+}
+
+.hint {
+  color: var(--muted);
+  padding: 16px 14px;
+}

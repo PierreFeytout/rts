@@ -1,0 +1,93 @@
+/* Shared look of every tool: the game's palette, dense, keyboard-friendly. */
+
+:root {
+  --void: #0a0806;
+  --ash: #14100d;
+  --iron: #221b15;
+  --line: #3a2a1c;
+  --dust: #5a483a;
+  --muted: #8a7a68;
+  --bone: #b8a894;
+  --text: #d8c8b4;
+  --ember: #c46a28;
+  --flame: #e8a04a;
+  --warning: #c4443a;
+  --verdigris: #4a7a5e;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--void);
+  color: var(--bone);
+  font: 13px/1.45 var(--mono);
+}
+
+a {
+  color: var(--flame);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  padding: 3px 9px;
+  background: var(--iron);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--ember);
+  color: var(--flame);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+button.primary {
+  border-color: var(--ember);
+  color: var(--flame);
+}
+
+button.icon {
+  padding: 1px 7px;
+  min-width: 26px;
+}
+
+input[type="search"],
+input[type="text"] {
+  width: 100%;
+  padding: 5px 8px;
+  background: var(--ash);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+input[type="range"] {
+  accent-color: var(--ember);
+}
+
+.muted {
+  color: var(--muted);
+}

@@ -13,6 +13,7 @@
     "build": "tsc --build",
     "clean": "tsc --build --clean",
     "dev": "npm run dev --workspace @rts/client",
+    "tools": "npm run dev --workspace @rts/tools",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint packages",

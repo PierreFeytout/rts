@@ -5,6 +5,13 @@ multiplayer, shipped as an Electron desktop app. The setting and art direction a
 in UNIVERSE.md; the model pipeline and its rules are in
 packages/client/assets/models/README.md.
 
+## Tools
+
+`npm run tools` serves the project's content tools at http://localhost:5174
+(packages/tools; its README says how to add one). Sound effects are assigned
+with the sound effects tool there, from the library in art/sfx-library -- not
+generated, and not chosen for the user.
+
 ## Music
 
 The soundtrack is the project's own recordings, never generated: files in
@@ -14,7 +21,7 @@ packages/client/assets/music, assigned to menus, match moods and races by
 ## 3D models: the quality bar
 
 **Every unit and building model must be at least as detailed as the Conscript**
-(`scripts/models/conscript.py`). Never deliver anything simpler — new models,
+(`scripts/models/conscript.py`). Never deliver anything simpler â€” new models,
 reworked models, both races.
 
 - Dozens of modelled pieces, using the whole triangle budget. Not a dozen boxes.

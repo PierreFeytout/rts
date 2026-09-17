@@ -1,0 +1,13 @@
+{
+  "name": "@rts/tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite"
+  },
+  "dependencies": {
+    "@rts/content": "*",
+    "@rts/sim": "*"
+  }
+}

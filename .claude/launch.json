@@ -4,8 +4,22 @@
     {
       "name": "client",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--workspace", "@rts/client"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--workspace",
+        "@rts/client"
+      ],
       "port": 5173
+    },
+    {
+      "name": "tools",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "tools"
+      ],
+      "port": 5174
     }
   ]
 }

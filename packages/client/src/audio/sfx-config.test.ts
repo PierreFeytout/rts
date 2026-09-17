@@ -1,5 +1,7 @@
+import { defaultContent } from "@rts/content";
+import { CAN_ATTACK, KIND_BUILDING } from "@rts/sim";
 import { describe, expect, it } from "vitest";
-import { keysFor, parseSfxConfig, resolveSound, spatial } from "./sfx-config.js";
+import { keysFor, parseSfxConfig, resolveSound, soundCatalog, spatial } from "./sfx-config.js";
 
 const FILES = new Set(["rivet-1.ogg", "rivet-2.ogg", "boom.wav", "click.ogg", "death.ogg"]);
 
@@ -96,5 +98,36 @@ describe("spatial", () => {
     // Straight up the screen is dead centre.
     expect(spatial(-5, -5, 10, right, -right).pan).toBeCloseTo(0);
     expect(spatial(100, -100, 10, right, -right).pan).toBe(0.7);
+  });
+});
+
+describe("soundCatalog", () => {
+  const catalog = soundCatalog(defaultContent, CAN_ATTACK, KIND_BUILDING);
+  const byKey = new Map(catalog.map((e) => [e.key, e]));
+
+  it("lists every family, its general kinds, each race, and what each applies to", () => {
+    expect(byKey.get("shot")).toMatchObject({ family: "shot", label: "any", chain: ["shot"] });
+    expect(byKey.get("shot.kinetic")!.chain).toEqual(["shot.kinetic", "shot"]);
+    expect(byKey.get("shot.vanguard")).toMatchObject({ label: "The Ashen Directorate" });
+    expect(byKey.get("shot.vanguard.trooper")).toMatchObject({
+      label: "Conscript",
+      chain: ["shot.vanguard.trooper", "shot.vanguard", "shot.kinetic", "shot"],
+    });
+    expect(byKey.get("shot.vanguard.turret")!.chain).toContain("shot.plasma");
+    expect(byKey.get("death.vanguard.nexus")!.chain).toContain("death.building");
+    expect(byKey.get("ui.click")!.chain).toEqual(["ui.click", "ui"]);
+  });
+
+  it("offers a key only where the game can ask for it", () => {
+    // A Habstack never fires and is never trained; a Conscript is never built.
+    expect(byKey.has("shot.vanguard.pylon")).toBe(false);
+    expect(byKey.has("trained.vanguard.pylon")).toBe(false);
+    expect(byKey.has("built.vanguard.trooper")).toBe(false);
+    expect(byKey.has("built.vanguard.pylon")).toBe(true);
+    expect(byKey.has("deposit.vanguard")).toBe(false);
+  });
+
+  it("names every key once", () => {
+    expect(new Set(catalog.map((e) => e.key)).size).toBe(catalog.length);
   });
 });

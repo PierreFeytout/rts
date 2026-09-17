@@ -1,8 +1,20 @@
 # Sound effects
 
-Put sounds in this folder -- `.ogg`, `.wav`, `.mp3`, `.m4a` or `.flac`, in
-sub-folders if you like -- and say what each one is for in `sfx.json`, beside this
-file. The game decodes every sound `sfx.json` uses at startup.
+**Use the sound effects tool** rather than editing this folder by hand:
+
+```bash
+npm run tools
+```
+
+then open http://localhost:5174/sfx.html. It lists every sound in the library
+(`art/sfx-library`), plays them, and assigns them to what happens in a match;
+Save copies the sounds used into this folder, writes `sfx.json`, and removes any
+sound here nothing uses any more. Add sounds to the project by putting them in
+`art/sfx-library` -- in a folder per pack, with its licence.
+
+By hand works too: sounds go in this folder -- `.ogg`, `.wav`, `.mp3`, `.m4a`
+or `.flac`, in sub-folders if you like -- and `sfx.json` says what each one is
+for. The game decodes every sound `sfx.json` uses at startup.
 
 A mistake in `sfx.json` costs the entry it is in: the game prints what is wrong,
 naming the entry, in the browser console (or the terminal with `RTS_VERBOSE=1`),
