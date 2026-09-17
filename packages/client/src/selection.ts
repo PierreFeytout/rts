@@ -18,6 +18,7 @@ import {
 } from "@rts/sim";
 import * as THREE from "three";
 import { simToWorld, worldToSim } from "./coords.js";
+import { anyModal } from "./modal.js";
 import type { IsoCamera } from "./iso-camera.js";
 
 /**
@@ -159,6 +160,9 @@ export class Selection {
       // on the same page.
       const target = ev.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      // A menu is open over the match. Reaching Settings with the keyboard
+      // would otherwise also tell the selected squad to stop.
+      if (anyModal()) return;
 
       switch (ev.key.toLowerCase()) {
         case "s":
@@ -174,9 +178,10 @@ export class Selection {
             this.changed();
           }
           break;
-        case "escape":
-          this.cancelPending();
-          break;
+        // Escape is not here: it cancels a pending order *or* opens the
+        // in-game menu, and only one place can decide which. MatchMenu calls
+        // `cancelPending` first and opens itself if there was nothing to
+        // cancel.
       }
     });
   }
@@ -205,12 +210,21 @@ export class Selection {
     this.changed();
   }
 
-  cancelPending(): void {
-    if (this.buildType === 0 && !this.attackMovePending) return;
+  /**
+   * Drop a half-given order: a building waiting to be placed, or an
+   * attack-move waiting for its target.
+   *
+   * Reports whether there was one, because Escape means two things in a match
+   * -- cancel this, or open the menu -- and which it meant is exactly this
+   * answer. See MatchMenu.
+   */
+  cancelPending(): boolean {
+    if (this.buildType === 0 && !this.attackMovePending) return false;
     this.buildType = 0;
     this.attackMovePending = false;
     this.ghostTile = null;
     this.changed();
+    return true;
   }
 
   /** Replace the selection wholesale, e.g. from a HUD button. */

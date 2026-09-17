@@ -12,6 +12,24 @@ packages/client/assets/models/README.md.
 with the sound effects tool there, from the library in art/sfx-library -- not
 generated, and not chosen for the user.
 
+## Interface
+
+Every screen outside a match is built from `screens/shell.ts` -- the game's
+name, one card, a footer -- and every menu is `chooseFrom`. Adding a screen
+means adding a list of entries, never new markup or new colours.
+
+- **A menu is a room, not a page.** Escape goes back from everywhere, the arrow
+  keys and Enter work, and the first entry is focused when a menu opens.
+- Settings are pages under one menu (player, audio, camera, display), the same
+  ones from the title screen and from the in-game menu. They apply as they are
+  moved -- nothing to confirm -- and live in `settings.ts`, which whatever is
+  running subscribes to.
+- **Nothing is added to a match screen in a corner.** What is not playing is
+  behind Escape, in `screens/match-menu.ts`.
+- Anything drawn over the match is built and removed with the match, never left
+  in `index.html`, which holds the canvas and nothing else.
+- Colours, type and spacing come from `ui.ts`. No hex codes anywhere else.
+
 ## Music
 
 The soundtrack is the project's own recordings, never generated: files in

@@ -1,4 +1,6 @@
 import type { IsoCamera } from "./iso-camera.js";
+import { anyModal } from "./modal.js";
+import { settings } from "./settings.js";
 
 /**
  * Keyboard, mouse and edge-scroll panning for the isometric camera.
@@ -6,6 +8,11 @@ import type { IsoCamera } from "./iso-camera.js";
  * Kept separate from `IsoCamera` so the rig stays a pure transform that a
  * replay viewer or a headless screenshot tool can drive without dragging in DOM
  * event listeners.
+ *
+ * How fast it all moves, and whether the edges scroll at all, is the player's
+ * to decide: the constants below are what a multiplier of one means, and the
+ * settings are read on the spot rather than copied in, so a slider moved in the
+ * in-game menu is felt on the next frame.
  */
 
 /** Keyboard pan speed, in screen-heights per second. Scales with zoom. */
@@ -29,8 +36,6 @@ export class CameraControls {
 
   /** Set false while a modal or text field has focus. */
   enabled = true;
-  /** Edge scrolling is off by default: it fights with UI along the screen edges. */
-  edgeScroll = false;
 
   private readonly rig: IsoCamera;
   private readonly element: HTMLElement;
@@ -68,7 +73,7 @@ export class CameraControls {
       this.pointerX = ev.clientX;
       this.pointerY = ev.clientY;
       this.pointerInside = true;
-      if (!this.dragging || !this.enabled) return;
+      if (!this.dragging || !this.active) return;
       const scale = this.rig.worldUnitsPerPixel(element.clientHeight);
       // Drag moves the world with the cursor, so pan the camera the other way.
       this.rig.pan(-(ev.clientX - this.lastX) * scale, (ev.clientY - this.lastY) * scale);
@@ -93,9 +98,14 @@ export class CameraControls {
       "wheel",
       (e) => {
         const ev = e as WheelEvent;
-        if (!this.enabled) return;
+        if (!this.active) return;
         ev.preventDefault();
-        this.rig.zoomBy(ev.deltaY > 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
+        const chosen = settings.current;
+        // A notch is the same multiplier either way round, so zooming in and
+        // back out returns to exactly where it started.
+        const step = 1 + (ZOOM_STEP - 1) * chosen.zoomSpeed;
+        const out = chosen.invertZoom ? ev.deltaY < 0 : ev.deltaY > 0;
+        this.rig.zoomBy(out ? step : 1 / step);
       },
       { passive: false },
     );
@@ -106,7 +116,8 @@ export class CameraControls {
 
   /** Advance continuous (held-key and edge) panning. `dtSec` is real seconds. */
   update(dtSec: number): void {
-    if (!this.enabled) return;
+    if (!this.active) return;
+    const chosen = settings.current;
 
     let dx = 0;
     let dy = 0;
@@ -119,11 +130,11 @@ export class CameraControls {
     if (dx !== 0 || dy !== 0) {
       // Normalise so diagonal panning is not ~1.41x faster than straight.
       const len = Math.hypot(dx, dy);
-      const speed = this.rig.viewHeight * KEY_PAN_SCREENS_PER_SEC * dtSec;
+      const speed = this.rig.viewHeight * KEY_PAN_SCREENS_PER_SEC * chosen.panSpeed * dtSec;
       this.rig.pan((dx / len) * speed, (dy / len) * speed);
     }
 
-    if (this.edgeScroll && this.pointerInside && !this.dragging) {
+    if (chosen.edgeScroll && this.pointerInside && !this.dragging) {
       const w = this.element.clientWidth;
       const h = this.element.clientHeight;
       let ex = 0;
@@ -134,7 +145,7 @@ export class CameraControls {
       else if (this.pointerY > h - EDGE_MARGIN_PX) ey -= 1;
 
       if (ex !== 0 || ey !== 0) {
-        const speed = this.rig.viewHeight * EDGE_PAN_SCREENS_PER_SEC * dtSec;
+        const speed = this.rig.viewHeight * EDGE_PAN_SCREENS_PER_SEC * chosen.panSpeed * dtSec;
         const len = Math.hypot(ex, ey);
         this.rig.pan((ex / len) * speed, (ey / len) * speed);
       }
@@ -144,6 +155,17 @@ export class CameraControls {
   dispose(): void {
     for (const d of this.disposers) d();
     this.disposers.length = 0;
+  }
+
+  /**
+   * Whether the camera should be listening at all.
+   *
+   * A menu over the match is not a reason to keep panning: the keys held when
+   * it opened are still held, and without this the map slides away underneath
+   * the settings page.
+   */
+  private get active(): boolean {
+    return this.enabled && !anyModal();
   }
 
   private listen(

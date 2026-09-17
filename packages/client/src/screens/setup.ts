@@ -1,7 +1,8 @@
 import { defaultContent } from "@rts/content";
 import type { HostInfo } from "../desktop.js";
 import { MAP_IDS, RACE_IDS, type MatchConfig, type SlotKind } from "../match.js";
-import { TEAM_COLOURS, escapeHtml, screen } from "../ui.js";
+import { TEAM_COLOURS, escapeHtml } from "../ui.js";
+import { screen } from "./shell.js";
 
 /**
  * Match setup: map, player slots, races.
@@ -45,8 +46,8 @@ const TITLES: Record<SetupMode, { title: string; sub: string }> = {
 };
 
 export class SetupScreen {
-  private readonly root: HTMLDivElement;
   private readonly panel: HTMLDivElement;
+  private readonly dismiss: () => void;
   private readonly options: SetupOptions;
   private config: MatchConfig;
   private localSlot: number;
@@ -56,9 +57,12 @@ export class SetupScreen {
     this.config = options.config;
     this.localSlot = options.localSlot;
 
-    const built = screen(true);
-    this.root = built.root;
+    // Escape leaves, exactly as it does in the menus that lead here -- and
+    // whether or not the screen is busy waiting on a port or a host, which is
+    // precisely when somebody wants out of it.
+    const built = screen(true, () => options.onBack());
     this.panel = built.panel;
+    this.dismiss = built.close;
     this.render();
   }
 
@@ -93,7 +97,7 @@ export class SetupScreen {
   }
 
   close(): void {
-    this.root.remove();
+    this.dismiss();
   }
 
   // -- rendering -------------------------------------------------------------

@@ -44,41 +44,16 @@
            would fight them. */
         touch-action: none;
       }
-      #hud {
-        position: fixed;
-        top: 10px;
-        left: 12px;
-        padding: 8px 12px;
-        border: 1px solid #33261c;
-        border-radius: 4px;
-        background: rgba(16, 12, 9, 0.72);
-        color: #94816a;
-        font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        white-space: pre;
-        pointer-events: none;
-        backdrop-filter: blur(4px);
-      }
-      #help {
-        position: fixed;
-        /* Above the console, not beside it. The console now occupies the whole
-           bottom edge, and anything sharing that line is drawn over. */
-        bottom: 124px;
-        left: 50%;
-        transform: translateX(-50%);
-        color: #5a4c3e;
-        font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        pointer-events: none;
-        white-space: nowrap;
-      }
     </style>
   </head>
   <body>
+    <!--
+      The page is the canvas and nothing else. Menus, the console, the
+      performance readout and the control reminders are all built and removed
+      by the code that owns them -- see screens/shell.ts and game.ts -- so
+      nothing from a finished match is left on screen behind the menu.
+    -->
     <canvas id="viewport"></canvas>
-    <div id="hud"></div>
-    <div id="help">
-      drag — select · right click — move / attack / gather · Esc — cancel · WASD or middle drag — pan
-      · wheel — zoom
-    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

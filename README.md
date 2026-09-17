@@ -86,7 +86,7 @@ RTS_DEV_SERVER=http://localhost:5173 npx electron packages/desktop/dist/main.js
 ```
 
 ```bash
-npm test           # 338 tests
+npm test           # 446 tests
 npm run typecheck
 npm run lint       # includes the determinism rules
 ```
@@ -102,12 +102,21 @@ npm run lint       # includes the determinism rules
 | `1`..`9` | recall a group; press twice to centre the camera on it |
 | click/drag minimap | jump the camera |
 | `S` / `H` | stop / hold position |
-| `Esc` | cancel a pending build placement |
+| `Esc` | cancel a pending build placement, or open the menu when there is none |
+| `F10` | open the menu, whatever else is going on |
+| `²` (the key above Tab) | show or hide the performance readout |
 | `WASD`, arrows, middle-drag | pan |
 | wheel | zoom |
 
-The host gets a **save replay** button in the corner; anyone can load one from
-the main menu with **Watch a replay**. **Leave match** returns to the menu.
+**Escape opens the in-game menu**: settings, saving the replay (host only), and
+the way back to the main menu. It **pauses the match when it can** -- a skirmish
+or a replay stops dead; a match with somebody else in it keeps running, because
+this client is one peer of a lockstep match and stopping its clock would stall
+theirs. Recordings are loaded from the main menu with **Watch a replay**.
+
+The menus are a tree -- title screen, multiplayer, settings and its four pages --
+and every screen is the same frame: the game's name, one card, Escape to go
+back, arrow keys and Enter to choose. See `packages/client/src/screens/shell.ts`.
 
 Right-click is deliberately contextual — the same button means move, attack,
 gather or rally depending on what is under the cursor. That is the genre
@@ -165,11 +174,12 @@ war), `commands`, `types` (the *shape* of content, and the damage matrix),
 `fixture-types` and `scenario` (the determinism fixture), and `world` (`step()`
 is the only mutator).
 
-Inside `packages/client`: `screens/` (menu, match setup, join, and the router
-that loops between them), `lobby-host` and `lobby-guest` (the pre-match
+Inside `packages/client`: `screens/` (`shell` -- the frame every screen is built
+in -- the menu tree, settings, the in-game menu, match setup, join, and the
+router that loops between them), `lobby-host` and `lobby-guest` (the pre-match
 protocol), `match` (building a world from a lobby configuration), `game` (the
-match screen), `ui` (the design tokens, in one place at last), and the
-renderers.
+match screen), `settings` (what the player has chosen, and everyone watching it
+change), `ui` (the design tokens, in one place at last), and the renderers.
 
 Four packages — `sim`, `content`, `protocol`, `netcode` — and `transport` too
 deliberately avoid both DOM and Node types. That constraint is what made this

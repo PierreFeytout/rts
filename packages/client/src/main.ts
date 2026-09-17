@@ -14,6 +14,7 @@ import { loadModels } from "./model-library.js";
 import { createEmptyWorld } from "./match.js";
 import { Reconnector } from "./reconnect.js";
 import { ReplayControls, downloadReplay } from "./replay-ui.js";
+import { MatchMenu } from "./screens/match-menu.js";
 import { chooseMatch, type Launch } from "./screens/router.js";
 import { installStyles } from "./ui.js";
 
@@ -87,11 +88,6 @@ async function runMatch(launch: Launch): Promise<void> {
       running = false;
       controls.dispose();
     });
-  } else if (game.saveReplay) {
-    // Host only: a guest never sees the authoritative command log.
-    cleanup.push(
-      cornerButton("save replay", 34, () => downloadReplay(game.saveReplay!()), "saved"),
-    );
   }
 
   // Guests survive a dropped connection. The host does not: there is nobody for
@@ -124,48 +120,25 @@ async function runMatch(launch: Launch): Promise<void> {
 
   exposeDevHandle(game, launch);
 
+  // Everything that is not playing -- the settings, saving the recording, and
+  // the way out -- is behind Escape. See MatchMenu.
   await new Promise<void>((resolve) => {
-    cleanup.push(cornerButton("leave match", 10, () => resolve()));
+    const menu = new MatchMenu({
+      // A match with somebody else in it is their clock too. Only a skirmish
+      // or a replay actually stops.
+      canPause: () => game.peerCount() === 0,
+      setPaused: (paused) => game.setPaused(paused),
+      cancelPending: () => game.selection.cancelPending(),
+      // Host only: a guest never sees the authoritative command log.
+      saveReplay: game.saveReplay ? () => downloadReplay(game.saveReplay!()) : undefined,
+      onLeave: resolve,
+    });
+    cleanup.push(() => menu.dispose());
   });
 
   for (const undo of cleanup) undo();
   game.stop();
   delete window.__rts;
-}
-
-/**
- * A button in the **top-right** corner of the match screen.
- *
- * It was the bottom-right corner until the console moved in there and put the
- * command card underneath both of these. Stacked by offset rather than laid
- * out, because there are two of them and a container would be more code than
- * the thing it contained. Returns its own remover, so the match teardown is a
- * list of undos rather than a list of queries.
- *
- * `top` is measured from below the resource readout, which owns that corner.
- */
-function cornerButton(
-  label: string,
-  top: number,
-  onClick: () => void,
-  confirmation?: string,
-): () => void {
-  const button = document.createElement("button");
-  button.textContent = label;
-  button.style.cssText =
-    `position:fixed;top:${top + 38}px;right:12px;z-index:13;padding:4px 10px;` +
-    "border:1px solid var(--line-2);border-radius:4px;background:rgba(16,12,9,0.8);" +
-    "color:var(--muted);font:11px/1.5 var(--mono);cursor:pointer";
-  button.onclick = () => {
-    onClick();
-    // Saving reports back in place, because nothing else visibly happens.
-    // Leaving does not: the button is about to be removed.
-    if (confirmation === undefined) return;
-    button.textContent = confirmation;
-    setTimeout(() => (button.textContent = label), 1500);
-  };
-  document.body.appendChild(button);
-  return () => button.remove();
 }
 
 // ---------------------------------------------------------------------------

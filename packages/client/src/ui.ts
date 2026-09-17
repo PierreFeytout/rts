@@ -157,6 +157,133 @@ const SCREENS = `
 
 
 /**
+ * The menus themselves: the title, the lists of choices, and the settings rows.
+ *
+ * A menu is a stage -- the game's name, one card, a footer -- and the card is
+ * the only part that changes as a player walks down into a sub-menu. That is
+ * what makes the tree read as one place with rooms in it rather than as five
+ * unrelated screens that happen to share a background.
+ *
+ * Every rule here is written under `.rts-screen` rather than on its own class,
+ * because the generic `.rts-screen button` above would otherwise win on
+ * specificity and put a menu entry back into a form button's clothes.
+ */
+const MENUS = `
+.rts-stage {
+  display: grid; gap: 22px; justify-items: center; align-content: center;
+  width: 100%; padding: 32px 16px;
+}
+.rts-brand { text-align: center; }
+.rts-brand h1 {
+  margin: 0 0 7px;
+  font-size: 34px; font-weight: 600;
+  /* Tracked wide and shifted right by one gap, so the letter-spacing after the
+     last letter does not pull the whole word off centre. */
+  letter-spacing: 0.34em; text-indent: 0.34em;
+  color: var(--accent);
+  text-shadow: 0 0 30px rgba(232, 160, 74, 0.22);
+}
+.rts-brand p {
+  color: var(--dim); font-size: 11px;
+  letter-spacing: 0.2em; text-transform: uppercase;
+}
+
+.rts-entries { display: grid; gap: 8px; }
+.rts-screen .rts-entry {
+  position: relative;
+  display: block; width: 100%; text-align: left;
+  padding: 12px 14px 12px 17px;
+  border: 1px solid var(--line-2); border-radius: var(--radius);
+  /* Lit from above, like the console bays: the menu is made of the same metal
+     as the interface it leads to. */
+  background: linear-gradient(180deg, #1b140e, #120d09);
+  color: var(--text);
+  transition: background 90ms ease, border-color 90ms ease;
+}
+/* The marker for "this is the one" -- hover and keyboard focus are the same
+   state, so a player who arrows down sees exactly what a player who points
+   sees. */
+.rts-screen .rts-entry::before {
+  content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px;
+  background: transparent; transition: background 90ms ease;
+}
+.rts-screen .rts-entry:hover:not(:disabled),
+.rts-screen .rts-entry:focus-visible {
+  background: #241a12; border-color: var(--edge); outline: none;
+}
+.rts-screen .rts-entry:hover:not(:disabled)::before,
+.rts-screen .rts-entry:focus-visible::before { background: var(--accent); }
+.rts-screen .rts-entry:disabled { opacity: 0.4; }
+.rts-entry .label { display: block; letter-spacing: 0.06em; }
+/* The obvious choice is marked by its edge and its title, not by being filled
+   in: a solid block would be brighter than the hover state and the highlight
+   would have nowhere left to go on the one entry most likely to be hovered. */
+.rts-screen .rts-entry.primary {
+  background: linear-gradient(180deg, #221710, #17100b);
+  border-color: var(--edge);
+}
+.rts-screen .rts-entry.primary:hover:not(:disabled),
+.rts-screen .rts-entry.primary:focus-visible { background: #2b1e13; }
+.rts-entry.primary .label { color: var(--accent); }
+.rts-entry .note { display: block; margin-top: 3px; color: var(--dim); font-size: 11px; }
+
+.rts-actions {
+  display: flex; gap: 8px; align-items: center; justify-content: flex-end;
+  margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line);
+}
+.rts-actions .left { margin-right: auto; }
+.rts-foot { color: var(--dim); font-size: 11px; letter-spacing: 0.1em; }
+
+/* -- one setting, one row ------------------------------------------------ */
+
+.rts-setting {
+  display: grid; grid-template-columns: 1fr minmax(140px, 200px) 54px;
+  gap: 4px 14px; align-items: center;
+  padding: 11px 0; border-bottom: 1px solid var(--line);
+}
+.rts-setting:last-child { border-bottom: none; }
+.rts-setting .name { letter-spacing: 0.04em; }
+.rts-setting .note { margin-top: 3px; color: var(--dim); font-size: 11px; }
+.rts-setting .value { color: var(--muted); font-size: 12px; text-align: right; }
+.rts-setting input, .rts-setting select { width: 100%; }
+.rts-screen .rts-setting button { width: 100%; padding: 8px 12px; }
+.rts-screen .rts-setting button[aria-pressed="true"] {
+  border-color: var(--accent); background: #2a1c10; color: var(--accent);
+}
+
+/* A slider, built rather than tinted. The browser's own is a light grey bar
+   with a blue thumb whatever accent-color says about the fill, and one pale
+   rounded rectangle is enough to make a whole page look like a form.
+   (No backticks in here -- this is inside a template literal.) */
+.rts-screen input[type="range"], .rts-replay input[type="range"] {
+  appearance: none; -webkit-appearance: none;
+  height: 5px; padding: 0;
+  border: 1px solid var(--line-2); border-radius: 3px;
+  background: #0d0a07; cursor: pointer;
+}
+.rts-screen input[type="range"]::-webkit-slider-thumb,
+.rts-replay input[type="range"]::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none;
+  width: 15px; height: 15px;
+  border: 1px solid var(--bg-deep); border-radius: 50%;
+  background: var(--accent);
+}
+.rts-screen input[type="range"]::-moz-range-thumb,
+.rts-replay input[type="range"]::-moz-range-thumb {
+  width: 15px; height: 15px;
+  border: 1px solid var(--bg-deep); border-radius: 50%;
+  background: var(--accent);
+}
+
+/* -- over a running match ------------------------------------------------ */
+
+/* No gradient: the match is still there, and the point of the in-game menu is
+   that you can see what you are going back to. */
+.rts-screen.overlay { background: rgba(7, 5, 4, 0.74); backdrop-filter: blur(3px); }
+.rts-screen.overlay .rts-panel { box-shadow: 0 26px 70px rgba(0, 0, 0, 0.7); }
+`;
+
+/**
  * The match console.
  *
  * Overlaid on the rendered world rather than cutting into it, so the map keeps
@@ -278,6 +405,55 @@ const CONSOLE = `
   padding: 18px 44px; font: 24px/1.4 var(--mono);
   letter-spacing: 0.16em; text-align: center;
 }
+
+/* Something the match needs to say and hold on screen, as opposed to a toast:
+   a lost connection, and what is being done about it. */
+.rts-alert {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 16;
+  padding: 14px 26px; border-color: #5a3226; color: var(--warn);
+  font: 15px/1.6 var(--mono);
+}
+
+/* -- what the match writes over the world -------------------------------- */
+
+/* Off by default and toggled with the key above Tab; see settings.ts. Nothing
+   here is part of playing, and a wall of numbers over the corner of the map is
+   the fastest way to make a game look unfinished. */
+#rts-stats {
+  position: fixed; top: 10px; left: 12px; z-index: 12;
+  padding: 8px 12px;
+  border: 1px solid var(--line-2); border-radius: var(--radius);
+  background: rgba(16, 12, 9, 0.72);
+  color: var(--muted); font: 12px/1.55 var(--mono);
+  white-space: pre; pointer-events: none; backdrop-filter: blur(4px);
+}
+/* Above the console, not beside it: the console owns the whole bottom edge. */
+#rts-hints {
+  position: fixed; bottom: 124px; left: 50%; transform: translateX(-50%); z-index: 11;
+  /* Wraps rather than running off both edges: the line is longer than a narrow
+     window, and the half of it that is cut off is not the half that matters. */
+  width: min(860px, 88vw); text-align: center;
+  color: var(--dim); font: 11px/1.6 var(--mono);
+  pointer-events: none;
+}
+
+/* -- watching a recording ------------------------------------------------ */
+
+.rts-replay {
+  position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 13;
+  display: flex; gap: 10px; align-items: center;
+  width: min(680px, 88vw); padding: 8px 14px;
+  font: 12px/1.5 var(--mono); color: var(--text);
+}
+.rts-replay button {
+  padding: 4px 9px;
+  border: 1px solid var(--line-2); border-radius: 3px;
+  background: var(--raised); color: var(--text); font: inherit; cursor: pointer;
+}
+.rts-replay button:hover { border-color: var(--edge-hot); }
+.rts-replay button.on { border-color: var(--accent); background: #2a1c10; color: var(--accent); }
+.rts-replay input[type="range"] { flex: 1; }
+.rts-replay .at { min-width: 104px; text-align: right; color: var(--muted); }
 `;
 
 /** Add the shared stylesheet to the document. Safe to call repeatedly. */
@@ -285,26 +461,8 @@ export function installStyles(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement("style");
   style.id = STYLE_ID;
-  style.textContent = TOKENS + SCREENS + CONSOLE;
+  style.textContent = TOKENS + SCREENS + MENUS + CONSOLE;
   document.head.appendChild(style);
-}
-
-/**
- * A full-screen panel, mounted and ready to fill in.
- *
- * Returns the root so a caller can remove it, and the panel so it can add to
- * it. Screens are built and thrown away rather than hidden -- there is no state
- * worth keeping in a form that will be rebuilt from the config next time.
- */
-export function screen(wide = false): { root: HTMLDivElement; panel: HTMLDivElement } {
-  installStyles();
-  const root = document.createElement("div");
-  root.className = "rts-screen";
-  const panel = document.createElement("div");
-  panel.className = wide ? "rts-panel wide" : "rts-panel";
-  root.appendChild(panel);
-  document.body.appendChild(root);
-  return { root, panel };
 }
 
 /** Escape text destined for an innerHTML template. */

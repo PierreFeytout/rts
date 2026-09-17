@@ -1,4 +1,5 @@
-import { escapeHtml, screen } from "../ui.js";
+import { escapeHtml } from "../ui.js";
+import { screen } from "./shell.js";
 
 /**
  * Asking where the game is, and staying up until it is found.
@@ -35,7 +36,15 @@ export interface JoinOptions<T> {
 /** The connection, or null if the player went back. */
 export function showJoin<T>(options: JoinOptions<T>): Promise<T | null> {
   return new Promise((resolve) => {
-    const { root, panel } = screen();
+    let done = false;
+    const finish = (value: T | null): void => {
+      if (done) return;
+      done = true;
+      close();
+      resolve(value);
+    };
+
+    const { panel, close } = screen(false, () => finish(null));
 
     // Deep link straight into a friend's game: ?join=host:port
     const preset = new URLSearchParams(location.search).get("join") ?? "";
@@ -61,14 +70,6 @@ export function showJoin<T>(options: JoinOptions<T>): Promise<T | null> {
     const say = (message: string, tone: "info" | "error" = "info"): void => {
       status.textContent = message;
       status.className = tone === "error" ? "rts-status error" : "rts-status";
-    };
-
-    let done = false;
-    const finish = (value: T | null): void => {
-      if (done) return;
-      done = true;
-      root.remove();
-      resolve(value);
     };
 
     const go = (): void => {

@@ -2,6 +2,7 @@ import type { Replay } from "@rts/netcode";
 import { encodeReplay } from "@rts/netcode";
 import { defaultContent } from "@rts/content";
 import { REPLAY_SPEEDS, type ReplaySession } from "./replay-session.js";
+import { installStyles } from "./ui.js";
 
 /**
  * Saving a match and watching one back.
@@ -47,13 +48,11 @@ export class ReplayControls {
   constructor(session: ReplaySession) {
     this.session = session;
 
+    // A console bay like the others, rather than the one blue panel in a game
+    // that has no blue in it. See ui.ts.
+    installStyles();
     this.root = document.createElement("div");
-    this.root.style.cssText =
-      "position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:13;" +
-      "display:flex;gap:12px;align-items:center;padding:8px 14px;" +
-      "border:1px solid #234;border-radius:6px;background:rgba(8,12,20,0.86);" +
-      "color:#cfe4ff;backdrop-filter:blur(4px);width:min(680px,88vw);" +
-      "font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
+    this.root.className = "rts-bay rts-replay";
     document.body.appendChild(this.root);
 
     this.playButton = button("pause");
@@ -78,7 +77,6 @@ export class ReplayControls {
     this.scrub.min = "0";
     this.scrub.max = String(Math.max(1, session.length));
     this.scrub.value = "0";
-    this.scrub.style.cssText = "flex:1;accent-color:#63d0ff;cursor:pointer";
     // Seeking backwards replays from the start, which for a long match is a
     // visible pause. Doing it on release rather than on every input event
     // means one seek per drag instead of one per pixel.
@@ -94,7 +92,7 @@ export class ReplayControls {
     this.root.appendChild(this.scrub);
 
     this.label = document.createElement("span");
-    this.label.style.cssText = "min-width:104px;text-align:right;color:#8fb4d8";
+    this.label.className = "at";
     this.root.appendChild(this.label);
 
     this.sync();
@@ -110,9 +108,7 @@ export class ReplayControls {
     for (const child of this.root.children) {
       const speed = (child as HTMLElement).dataset?.speed;
       if (speed === undefined) continue;
-      const active = Number(speed) === this.session.playbackSpeed;
-      (child as HTMLElement).style.borderColor = active ? "#7dffb0" : "#2f6f8f";
-      (child as HTMLElement).style.background = active ? "#1c3a2c" : "#14283a";
+      child.classList.toggle("on", Number(speed) === this.session.playbackSpeed);
     }
   }
 
@@ -136,8 +132,5 @@ function clock(ticks: number): string {
 function button(label: string): HTMLButtonElement {
   const element = document.createElement("button");
   element.textContent = label;
-  element.style.cssText =
-    "border:1px solid #2f6f8f;border-radius:4px;background:#14283a;color:#cfe4ff;" +
-    "font:inherit;padding:4px 9px;cursor:pointer";
   return element;
 }

@@ -20,6 +20,7 @@ import {
 import { music } from "../audio/music.js";
 import { ReplaySession } from "../replay-session.js";
 import { showMenu, showMultiplayerMenu } from "./menu.js";
+import { showSettings } from "./settings.js";
 import { showJoin } from "./join.js";
 import { SetupScreen } from "./setup.js";
 
@@ -73,6 +74,13 @@ export async function chooseMatch(): Promise<Launch> {
         if (launch) return launch;
         break;
       }
+      case "settings":
+        music.play("menu.settings");
+        // Nothing to hand back: every page writes as it goes, and the main
+        // menu is rebuilt when this returns -- which is what picks up a new
+        // name without the settings screen having to say it changed.
+        await showSettings();
+        break;
       case "quit":
         // Only offered in the desktop build, where a page cannot close itself.
         await desktop?.quit();

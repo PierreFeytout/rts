@@ -1,5 +1,6 @@
 import { type EntityId, type World } from "@rts/sim";
 import type { IsoCamera } from "./iso-camera.js";
+import { anyModal } from "./modal.js";
 import type { Selection } from "./selection.js";
 
 /**
@@ -41,6 +42,8 @@ export class ControlGroups {
     const handler = (event: KeyboardEvent): void => {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      // Not while a menu is over the match; see modal.ts.
+      if (anyModal()) return;
 
       const digit = Number(event.key);
       if (!Number.isInteger(digit) || digit < 1 || digit > 9) return;

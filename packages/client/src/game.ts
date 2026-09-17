@@ -19,6 +19,7 @@ import type { ModelLibrary } from "./model-library.js";
 import { Minimap } from "./minimap.js";
 import { RallyMarkers } from "./rally-markers.js";
 import { Selection } from "./selection.js";
+import { settings, type Settings } from "./settings.js";
 import { TerrainRenderer } from "./terrain-renderer.js";
 import { WorldRenderer } from "./world-renderer.js";
 
@@ -96,6 +97,17 @@ export interface RunningGame {
   saveReplay: (() => Replay) | null;
   /** Shown over the match while a reconnect is in progress. */
   setBanner: (message: string | null) => void;
+  /** How many other people are in this match. Zero means it is safe to pause. */
+  peerCount: () => number;
+  readonly paused: boolean;
+  /**
+   * Stop handing time to the session, without stopping the renderer.
+   *
+   * Only the in-game menu sets this, and only when `peerCount()` is zero: this
+   * client is one peer of a lockstep match, so pausing its clock with somebody
+   * else connected would stall their game rather than this one.
+   */
+  setPaused: (paused: boolean) => void;
   rig: IsoCamera;
   selection: Selection;
   /** Exposed for the dev console: inspecting materials beats guessing. */
@@ -112,8 +124,9 @@ export function startGame(options: GameOptions): RunningGame {
   let session = options.session;
 
   const canvas = document.querySelector<HTMLCanvasElement>("#viewport")!;
+  // The pixel ratio is the render scale setting; it is set, with everything
+  // else the player has chosen, by `applySettings` below.
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
   const scene = new THREE.Scene();
   // The Ashworks: a low orange lid of a sky over ash that never settles. There
@@ -246,17 +259,64 @@ export function startGame(options: GameOptions): RunningGame {
 
   // ---------------------------------------------------------------------------
 
-  const debug = document.querySelector<HTMLDivElement>("#hud")!;
+  /**
+   * The performance readout, and the line of control reminders.
+   *
+   * Both belong to a match rather than to the page, so both are built here and
+   * removed with it -- the previous pair lived in index.html and were still on
+   * screen, with the last match's numbers in them, behind the menu.
+   *
+   * The readout is off unless it is asked for. It is a development instrument,
+   * not part of playing, and a block of numbers over the corner of the map is
+   * the fastest way to make a game look unfinished.
+   */
+  const stats = document.createElement("div");
+  stats.id = "rts-stats";
+  document.body.appendChild(stats);
+
+  const hints = document.createElement("div");
+  hints.id = "rts-hints";
+  hints.textContent =
+    "drag — select · right click — move / attack / gather · Esc — menu" +
+    " · WASD or middle drag — pan · wheel — zoom";
+  document.body.appendChild(hints);
 
   // Match-level status, shown over everything. Distinct from the HUD's own
   // transient toasts: this one stays up until the situation resolves.
   const banner = document.createElement("div");
-  banner.style.cssText =
-    "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:16;display:none;" +
-    "padding:14px 26px;border:1px solid #5a2f2a;border-radius:8px;background:rgba(8,12,20,0.92);" +
-    "color:#ffb4a0;backdrop-filter:blur(4px);" +
-    "font:15px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
+  banner.className = "rts-bay rts-alert";
+  banner.style.display = "none";
   document.body.appendChild(banner);
+
+  /** Follow the settings, both at startup and whenever one is changed. */
+  function applySettings(current: Settings): void {
+    stats.style.display = current.showStats ? "block" : "none";
+    hints.style.display = current.showHints ? "block" : "none";
+    // Two is where the sharpness stops being visible and the cost does not.
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio * current.renderScale, 2));
+    resize();
+  }
+  const stopWatchingSettings = settings.onChange(applySettings);
+
+  /**
+   * The key above Tab shows and hides the readout.
+   *
+   * `²` on a French keyboard, a backtick on a British one: the same physical
+   * key, and the one every game has used for a console since Quake. It writes
+   * the setting rather than a local flag, so the display page and the key are
+   * the same switch rather than two that disagree.
+   */
+  function onDebugKey(event: KeyboardEvent): void {
+    // By position first, then by what the key actually types -- a remapped
+    // layout, or a synthetic event from a test harness, may carry one and not
+    // the other.
+    if (event.code !== "Backquote" && event.key !== "²" && event.key !== "`") return;
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+    settings.set({ showStats: !settings.current.showStats });
+  }
+  window.addEventListener("keydown", onDebugKey);
+
   let lastFrameMs = performance.now();
   let lastPumpMs = lastFrameMs;
   let framesThisSecond = 0;
@@ -264,6 +324,7 @@ export function startGame(options: GameOptions): RunningGame {
   let fps = 0;
   let lastStepMs = 0;
   let running = true;
+  let paused = false;
   let cachedHash = "";
   let lastHashMs = 0;
 
@@ -275,6 +336,7 @@ export function startGame(options: GameOptions): RunningGame {
   }
   window.addEventListener("resize", resize);
   resize();
+  applySettings(settings.current);
 
   /**
    * Advance the simulation by however many whole ticks are due.
@@ -286,6 +348,14 @@ export function startGame(options: GameOptions): RunningGame {
    * timer and the render loop is safe.
    */
   function pump(nowMs: number): void {
+    // Paused: the clock is kept up to date but no time is handed to the
+    // session, so going back to the match does not run the minute spent in the
+    // menu all at once. Only ever set when nobody else is waiting on this
+    // client -- see MatchMenu.
+    if (paused) {
+      lastPumpMs = nowMs;
+      return;
+    }
     const deltaMs = nowMs - lastPumpMs;
     lastPumpMs = nowMs;
 
@@ -328,6 +398,17 @@ export function startGame(options: GameOptions): RunningGame {
     (ghost.material as THREE.MeshBasicMaterial).color.setHex(clear ? 0x7dffb0 : 0xff7a59);
   }
 
+  /**
+   * How many other people are in this match.
+   *
+   * Zero is what makes pausing safe: a skirmish, or a replay, is nobody else's
+   * clock. See MatchMenu.
+   */
+  function peerCount(): number {
+    if (isHost) return (session as HostSession).players.filter((p) => p.connected).length - 1;
+    return (session as GuestSession).isJoined ? 1 : 0;
+  }
+
   function renderFrame(deltaSeconds = 0): void {
     terrain.sync(world.grid);
     terrain.applyFog(world, localPlayer);
@@ -344,15 +425,11 @@ export function startGame(options: GameOptions): RunningGame {
     minimap.draw(performance.now());
     renderer.render(scene, rig.camera);
 
-    const peers = isHost
-      ? (session as HostSession).players.filter((p) => p.connected).length - 1
-      : (session as GuestSession).isJoined
-        ? 1
-        : 0;
+    const peers = peerCount();
 
     // Hashing walks the whole world -- entities, players, and the full cost
-    // grid. That is cheap at 20 Hz and wasteful at 240, so the HUD's copy is
-    // refreshed a few times a second rather than every frame.
+    // grid. That is cheap at 20 Hz and wasteful at 240, so the readout's copy
+    // is refreshed a few times a second rather than every frame.
     const now = performance.now();
     if (now - lastHashMs > 400) {
       lastHashMs = now;
@@ -360,12 +437,17 @@ export function startGame(options: GameOptions): RunningGame {
     }
     const hash = cachedHash;
 
-    debug.textContent =
-      `${fps} fps   tick ${world.tick} @ ${TICK_HZ}Hz   step ${lastStepMs.toFixed(2)}ms` +
-      `\n${world.entities.count} entities   ${selection.selected.size} selected` +
-      `   ${isHost ? "hosting" : "guest"}   ${peers} peer${peers === 1 ? "" : "s"}` +
-      (options.joinCode ? `   code ${options.joinCode}` : "") +
-      `\nhash ${hash}   player ${localPlayer}`;
+    // Skipped entirely while hidden. It is off by default, and formatting four
+    // lines nobody is looking at is work the frame does not need to do.
+    if (settings.current.showStats) {
+      stats.textContent =
+        `${fps} fps   tick ${world.tick} @ ${TICK_HZ}Hz   step ${lastStepMs.toFixed(2)}ms` +
+        (paused ? "   PAUSED" : "") +
+        `\n${world.entities.count} entities   ${selection.selected.size} selected` +
+        `   ${isHost ? "hosting" : "guest"}   ${peers} peer${peers === 1 ? "" : "s"}` +
+        (options.joinCode ? `   code ${options.joinCode}` : "") +
+        `\nhash ${hash}   player ${localPlayer}`;
+    }
 
     options.onStatus?.({ tick: world.tick, fps, peers, hash });
   }
@@ -429,6 +511,13 @@ export function startGame(options: GameOptions): RunningGame {
       banner.textContent = message ?? "";
       banner.style.display = message === null ? "none" : "block";
     },
+    peerCount,
+    get paused() {
+      return paused;
+    },
+    setPaused(on: boolean) {
+      paused = on;
+    },
     rig,
     selection,
     scene,
@@ -446,10 +535,14 @@ export function startGame(options: GameOptions): RunningGame {
       selection.dispose();
       hud.dispose();
       banner.remove();
+      stats.remove();
+      hints.remove();
       groups.dispose();
       minimap.dispose();
       fog.dispose();
       terrain.dispose();
+      stopWatchingSettings();
+      window.removeEventListener("keydown", onDebugKey);
       window.removeEventListener("resize", resize);
 
       // The scene's own resources. Nothing used to call `stop` at all, so this

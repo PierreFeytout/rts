@@ -61,6 +61,7 @@ round if `shuffle` is on; a slot with one track plays it again, which is a loop.
 | `menu.join` | typing an address to join | `menu.multiplayer` |
 | `menu.lobby` | a multiplayer lobby, hosting or joined | `menu.multiplayer` |
 | `menu.replays` | picking a replay | `menu.main` |
+| `menu.settings` | the settings pages, from the main menu | `menu.main` |
 | `match` | any match with nothing more specific | nothing |
 | `match.calm` | a match with no fighting near you | `match` |
 | `match.tension` | shots being exchanged | `match.calm` |
