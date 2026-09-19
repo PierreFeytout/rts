@@ -1,0 +1,6 @@
+Sonniss #GameAudioGDC Bundle (GDC 2026).
+Royalty-free: use personally or commercially, no attribution required.
+https://sonniss.com/gameaudiogdc
+
+Converted to 48 kHz Ogg Vorbis, and long takes cut into their
+individual sounds, by scripts/sfx/import_soniss.py.

@@ -12,6 +12,11 @@ Save copies the sounds used into this folder, writes `sfx.json`, and removes any
 sound here nothing uses any more. Add sounds to the project by putting them in
 `art/sfx-library` -- in a folder per pack, with its licence.
 
+A whole bundle at once goes through a script instead, so the choice of what was
+worth keeping is written down rather than being a folder somebody once dragged:
+`scripts/sfx/import_soniss.py` is the one for the Sonniss GDC bundle -- it names
+each sound, cuts the long takes into their individual hits, and converts to Ogg.
+
 By hand works too: sounds go in this folder -- `.ogg`, `.wav`, `.mp3`, `.m4a`
 or `.flac`, in sub-folders if you like -- and `sfx.json` says what each one is
 for. The game decodes every sound `sfx.json` uses at startup.

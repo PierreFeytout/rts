@@ -1,5 +1,60 @@
 {
   "volume": 1,
   "voices": 32,
-  "sounds": {}
+  "sounds": {
+    "built": {
+      "files": [
+        "soniss_mechanism/latch-thunk-deep.ogg"
+      ],
+      "volume": 1.6,
+      "pitch": 0.05,
+      "voices": 4,
+      "gap": 0.03
+    },
+    "built.vanguard": {
+      "files": [
+        "soniss_mechanism/tower-deploy-servo.ogg"
+      ],
+      "volume": 1,
+      "pitch": 0.05,
+      "voices": 4,
+      "gap": 0.03
+    },
+    "built.concord": {
+      "files": [
+        "kenney_sci-fi-sounds/slime_000.ogg"
+      ],
+      "volume": 1,
+      "pitch": 0.05,
+      "voices": 4,
+      "gap": 0.03
+    },
+    "trained.vanguard": {
+      "files": [
+        "soniss_mechanism/tower-deploy-servo.ogg"
+      ],
+      "volume": 0.15,
+      "pitch": 0,
+      "voices": 2,
+      "gap": 0.02
+    },
+    "trained.concord": {
+      "files": [
+        "soniss_creature/violent-exhale.ogg"
+      ],
+      "volume": 1.1,
+      "pitch": 0.05,
+      "voices": 4,
+      "gap": 0.03
+    },
+    "select.building": {
+      "files": [
+        "kenney_interface-sounds/select_001.ogg"
+      ],
+      "volume": 0.15,
+      "pitch": 0.5,
+      "voices": 4,
+      "gap": 0.02
+    }
+  }
 }
