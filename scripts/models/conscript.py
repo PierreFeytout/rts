@@ -104,7 +104,7 @@ rig = kit.armature("rig", col, bones)
 parts = []
 
 
-def piece(name, bm, mat, bone, painted=False, bevel=None, segments=1):
+def piece(name, bm, mat, bone, painted=False, bevel=None, segments=3):
     obj = kit.rigid_part(name, bm, mat, col, bone, painted=painted)
     if bevel is not None:
         kit.bevel(obj, width=bevel, segments=segments)
@@ -124,9 +124,9 @@ for side, y in (("L", LEG_Y), ("R", -LEG_Y)):
 
     # Hip: the frame's main pivot, a servo housing the leg hangs off.
     piece(f"{thigh}.servo", kit.rod((0, y - 0.022 * out, HIP - 0.004), (0, y + 0.026 * out, HIP - 0.004),
-                                    0.028, segments=10), s["servo"], thigh)
+                                    0.028, segments=20), s["servo"], thigh)
     piece(f"{thigh}.hub", kit.rod((0, y + 0.024 * out, HIP - 0.004), (0, y + 0.032 * out, HIP - 0.004),
-                                  0.014, segments=8), s["iron"], thigh)
+                                  0.014, segments=16), s["iron"], thigh)
 
     # The thigh itself: a structural member, not a limb.
     piece(f"{thigh}.frame", kit.frustum((0.05, 0.05), (0.058, 0.056), KNEE + 0.006, HIP - 0.008, (0, y)),
@@ -136,12 +136,12 @@ for side, y in (("L", LEG_Y), ("R", -LEG_Y)):
           s["plate"], thigh, bevel=0.006)
     # The ram that drives the knee, outside the leg.
     piece(f"{thigh}.ram", kit.rod((0.006, y + 0.05 * out, HIP - 0.018), (0.004, y + 0.046 * out, KNEE + 0.014),
-                                  0.009, segments=6), s["servo"], thigh)
+                                  0.009, segments=12), s["servo"], thigh)
     piece(f"{thigh}.ram.cap", kit.rod((0.006, y + 0.05 * out, HIP - 0.03), (0.006, y + 0.05 * out, HIP - 0.008),
-                                      0.013, segments=6), s["iron"], thigh)
+                                      0.013, segments=12), s["iron"], thigh)
 
     # Knee: a big exposed servo disc, and a cap over it.
-    piece(f"{shin}.servo", kit.rod((0, y - 0.03 * out, KNEE), (0, y + 0.034 * out, KNEE), 0.024, segments=10),
+    piece(f"{shin}.servo", kit.rod((0, y - 0.03 * out, KNEE), (0, y + 0.034 * out, KNEE), 0.024, segments=20),
           s["servo"], shin)
     piece(f"{shin}.cap", kit.box((0.016, 0.05, 0.036), (0.03, y, KNEE + 0.008), rotation=rot("Y", -10)),
           s["plate"], shin, bevel=0.005)
@@ -152,11 +152,11 @@ for side, y in (("L", LEG_Y), ("R", -LEG_Y)):
     piece(f"{shin}.plate", kit.box((0.016, 0.052, 0.066), (0.028, y, 0.078), rotation=rot("Y", 4)),
           s["plate"], shin, bevel=0.005)
     piece(f"{shin}.ram", kit.rod((-0.022, y + 0.03 * out, KNEE - 0.012), (-0.018, y + 0.028 * out, ANKLE + 0.012),
-                                 0.008, segments=6), s["servo"], shin)
+                                 0.008, segments=12), s["servo"], shin)
 
     # Ankle and boot: wide, flat, and heavy. The toe is a separate plate so
     # the foot has an edge to roll over.
-    piece(f"{foot}.ankle", kit.rod((0, y - 0.024, ANKLE), (0, y + 0.024, ANKLE), 0.017, segments=8),
+    piece(f"{foot}.ankle", kit.rod((0, y - 0.024, ANKLE), (0, y + 0.024, ANKLE), 0.017, segments=16),
           s["servo"], foot)
     piece(f"{foot}.boot", kit.box((0.088, 0.062, 0.032), (0.016, y, 0.03)), s["plate"], foot, bevel=0.007)
     piece(f"{foot}.toe", kit.box((0.03, 0.058, 0.022), (0.056, y, 0.022), rotation=rot("Y", 8)),
@@ -183,7 +183,7 @@ for y in (0.03, -0.03):
     piece(f"tasset{y}.rear", kit.box((0.01, 0.048, 0.046), (-0.05, y, 0.228), rotation=rot("Y", 12)),
           s["plate"], "pelvis", bevel=0.004)
     # Power down to each leg.
-    piece(f"conduit{y}", kit.rod((-0.03, y * 1.6, 0.258), (-0.012, y * 1.9, 0.214), 0.007, segments=6),
+    piece(f"conduit{y}", kit.rod((-0.03, y * 1.6, 0.258), (-0.012, y * 1.9, 0.214), 0.007, segments=12),
           s["rubber"], "pelvis")
 
 # ---------------------------------------------------------------------------
@@ -204,8 +204,8 @@ for z in (0.3, 0.34):
 piece("backplate", kit.box((0.014, 0.086, 0.09), (-0.048, 0, 0.318)), s["ceramic"], "chest", bevel=0.005)
 
 # Neck: a sealed ring, not a collar.
-piece("collar", kit.rod((0, 0, 0.366), (0, 0, 0.386), 0.036, segments=10), s["servo"], "chest")
-piece("collar.seal", kit.rod((0, 0, 0.384), (0, 0, 0.392), 0.03, segments=8), s["rubber"], "chest")
+piece("collar", kit.rod((0, 0, 0.366), (0, 0, 0.386), 0.036, segments=20), s["servo"], "chest")
+piece("collar.seal", kit.rod((0, 0, 0.384), (0, 0, 0.392), 0.03, segments=16), s["rubber"], "chest")
 
 # The pack: the frame's power, vented hot.
 piece("pack", kit.box((0.05, 0.11, 0.086), (-0.072, 0, 0.33)), s["plate"], "chest", bevel=0.008)
@@ -214,13 +214,13 @@ for y in (0.034, 0, -0.034):
     piece(f"pack.vent{y}", kit.box((0.008, 0.024, 0.042), (-0.096, y, 0.326)), lamp, "chest")
 piece("pack.grille", kit.box((0.006, 0.09, 0.05), (-0.09, 0, 0.326)), s["iron"], "chest")
 for y in (0.042, -0.042):
-    piece(f"stack{y}", kit.rod((-0.062, y, 0.378), (-0.058, y, 0.424), 0.011, segments=6), s["iron"], "chest")
-    piece(f"stack{y}.cap", kit.rod((-0.058, y, 0.42), (-0.058, y, 0.43), 0.015, segments=6), s["servo"], "chest")
+    piece(f"stack{y}", kit.rod((-0.062, y, 0.378), (-0.058, y, 0.424), 0.011, segments=12), s["iron"], "chest")
+    piece(f"stack{y}.cap", kit.rod((-0.058, y, 0.42), (-0.058, y, 0.43), 0.015, segments=12), s["servo"], "chest")
 
 # Hoses from the pack up to the helmet's seal.
 hose = [(-0.05, 0.03, 0.372), (-0.03, 0.042, 0.386), (0.004, 0.04, 0.39), (0.024, 0.024, 0.386)]
 for i, (a, b) in enumerate(zip(hose, hose[1:])):
-    piece(f"hose{i}", kit.rod(a, b, 0.006, segments=5), s["rubber"], "chest")
+    piece(f"hose{i}", kit.rod(a, b, 0.006, segments=10), s["rubber"], "chest")
 
 # ---------------------------------------------------------------------------
 # Shoulders: the yoke, and the pauldrons bolted to it. These are the widest
@@ -229,29 +229,29 @@ for i, (a, b) in enumerate(zip(hose, hose[1:])):
 # ---------------------------------------------------------------------------
 
 for side, sign in (("L", 1), ("R", -1)):
-    piece(f"yoke.{side}", kit.rod((0, 0.05 * sign, 0.368), (0, 0.092 * sign, 0.362), 0.026, segments=8),
+    piece(f"yoke.{side}", kit.rod((0, 0.05 * sign, 0.368), (0, 0.092 * sign, 0.362), 0.026, segments=16),
           s["servo"], "chest")
-    piece(f"shoulder.{side}.servo", kit.rod((0, 0.09 * sign, 0.362), (0, 0.108 * sign, 0.362), 0.031, segments=10),
+    piece(f"shoulder.{side}.servo", kit.rod((0, 0.09 * sign, 0.362), (0, 0.108 * sign, 0.362), 0.031, segments=20),
           s["iron"], "chest")
     # The pauldron: a cut hull panel, sloped outward and down, overhanging the
     # arm. Issued, so painted.
     piece(f"pauldron.{side}",
           kit.box((0.082, 0.05, 0.07), (0.0, 0.114 * sign, 0.346), rotation=rot("X", -14 * sign)),
-          s["paint"], "chest", painted=True, bevel=0.009, segments=2)
+          s["paint"], "chest", painted=True, bevel=0.009, segments=4)
     piece(f"pauldron.{side}.rim",
           kit.box((0.086, 0.016, 0.012), (0.0, 0.124 * sign, 0.312), rotation=rot("X", -20 * sign)),
           s["iron"], "chest", bevel=0.003)
     for x in (0.026, -0.022):
         piece(f"pauldron.{side}.bolt{x}",
-              kit.rod((x, 0.104 * sign, 0.372), (x, 0.112 * sign, 0.374), 0.005, segments=5), s["servo"], "chest")
+              kit.rod((x, 0.104 * sign, 0.372), (x, 0.112 * sign, 0.374), 0.005, segments=10), s["servo"], "chest")
 
 # ---------------------------------------------------------------------------
 # Head: a sealed hood. Small on purpose -- a head this size between those
 # shoulders is most of what makes the figure read as armoured rather than big.
 # ---------------------------------------------------------------------------
 
-piece("helmet", kit.box((0.062, 0.064, 0.058), (-0.006, 0, 0.424)), s["plate"], "head", bevel=0.016, segments=2)
-piece("helmet.crown", kit.ellipsoid((0.032, 0.033, 0.02), (-0.008, 0, 0.45), segments=8, rings=4),
+piece("helmet", kit.box((0.062, 0.064, 0.058), (-0.006, 0, 0.424)), s["plate"], "head", bevel=0.016, segments=4)
+piece("helmet.crown", kit.ellipsoid((0.032, 0.033, 0.02), (-0.008, 0, 0.45), segments=16, rings=8),
       s["iron"], "head")
 # The faceplate, cut back at an angle, with the lens slot across it.
 piece("face", kit.box((0.016, 0.058, 0.05), (0.03, 0, 0.424), rotation=rot("Y", -10)),
@@ -259,13 +259,13 @@ piece("face", kit.box((0.016, 0.058, 0.05), (0.03, 0, 0.424), rotation=rot("Y", 
 piece("lens.hood", kit.box((0.01, 0.054, 0.012), (0.038, 0, 0.436), rotation=rot("Y", -16)), s["iron"], "head")
 piece("lens", kit.box((0.006, 0.046, 0.011), (0.039, 0, 0.428)), lamp, "head")
 # The filter, sunk into the chin rather than hung off it.
-piece("filter", kit.rod((0.026, 0, 0.402), (0.046, 0, 0.4), 0.014, segments=8), s["servo"], "head")
-piece("filter.grille", kit.rod((0.044, 0, 0.4), (0.05, 0, 0.4), 0.011, segments=6), s["rubber"], "head")
+piece("filter", kit.rod((0.026, 0, 0.402), (0.046, 0, 0.4), 0.014, segments=16), s["servo"], "head")
+piece("filter.grille", kit.rod((0.044, 0, 0.4), (0.05, 0, 0.4), 0.011, segments=12), s["rubber"], "head")
 for y in (0.034, -0.034):
     piece(f"ear{y}", kit.box((0.026, 0.008, 0.026), (-0.004, y, 0.42)), s["servo"], "head", bevel=0.004)
 # One aerial, which breaks the helmet's outline against the ground.
-piece("aerial", kit.rod((-0.018, 0.03, 0.448), (-0.026, 0.036, 0.492), 0.0035, segments=5), s["iron"], "head")
-piece("aerial.tip", kit.rod((-0.026, 0.036, 0.488), (-0.027, 0.037, 0.496), 0.005, segments=5), lamp, "head")
+piece("aerial", kit.rod((-0.018, 0.03, 0.448), (-0.026, 0.036, 0.492), 0.0035, segments=10), s["iron"], "head")
+piece("aerial.tip", kit.rod((-0.026, 0.036, 0.488), (-0.027, 0.037, 0.496), 0.005, segments=10), lamp, "head")
 
 # ---------------------------------------------------------------------------
 # The rivet driver, and the armoured arms that hold it. All one bone: the
@@ -277,18 +277,18 @@ piece("receiver", kit.box((0.15, 0.03, 0.042), (0.07, GUN_Y, GUN_Z)), s["plate"]
 piece("receiver.top", kit.box((0.1, 0.026, 0.01), (0.074, GUN_Y, GUN_Z + 0.026)), s["iron"], "rifle")
 # The drum of rivets, hung under the receiver.
 piece("drum", kit.rod((0.048, GUN_Y - 0.016, GUN_Z - 0.036), (0.048, GUN_Y + 0.016, GUN_Z - 0.036), 0.028,
-                      segments=10), s["iron"], "rifle")
+                      segments=20), s["iron"], "rifle")
 piece("drum.hub", kit.rod((0.048, GUN_Y - 0.02, GUN_Z - 0.036), (0.048, GUN_Y + 0.02, GUN_Z - 0.036), 0.01,
-                          segments=6), s["servo"], "rifle")
+                          segments=12), s["servo"], "rifle")
 # The shroud, its heat vents, and the coils that drive a bolt white-hot.
-piece("shroud", kit.rod((0.14, GUN_Y, GUN_Z + 0.004), (0.25, GUN_Y, GUN_Z + 0.004), 0.015, segments=10),
+piece("shroud", kit.rod((0.14, GUN_Y, GUN_Z + 0.004), (0.25, GUN_Y, GUN_Z + 0.004), 0.015, segments=20),
       s["iron"], "rifle")
 for i, x in enumerate((0.158, 0.182, 0.206)):
     piece(f"vent{i}", kit.box((0.012, 0.022, 0.008), (x, GUN_Y, GUN_Z + 0.019)), s["rubber"], "rifle")
 for i, x in enumerate((0.224, 0.244, 0.264)):
     piece(f"coil{i}", kit.rod((x - 0.004, GUN_Y, GUN_Z + 0.004), (x + 0.004, GUN_Y, GUN_Z + 0.004), 0.019,
-                              segments=8), lamp, "rifle")
-piece("barrel", kit.rod((0.26, GUN_Y, GUN_Z + 0.004), (0.336, GUN_Y, GUN_Z + 0.004), 0.009, segments=8),
+                              segments=16), lamp, "rifle")
+piece("barrel", kit.rod((0.26, GUN_Y, GUN_Z + 0.004), (0.336, GUN_Y, GUN_Z + 0.004), 0.009, segments=16),
       s["servo"], "rifle")
 piece("brake", kit.box((0.03, 0.026, 0.026), (0.348, GUN_Y, GUN_Z + 0.004)), s["iron"], "rifle", bevel=0.005)
 # An optic, which is the clearest single sign that this is a weapon and not a pipe.
@@ -309,16 +309,16 @@ arms = {
 }
 for side, (shoulder, elbow, hand) in arms.items():
     ex, ey, ez = elbow
-    piece(f"arm.{side}.upper", kit.rod(shoulder, elbow, 0.018, segments=6, radius_end=0.015),
+    piece(f"arm.{side}.upper", kit.rod(shoulder, elbow, 0.018, segments=12, radius_end=0.015),
           s["servo"], "rifle")
     piece(f"arm.{side}.sleeve", kit.box((0.034, 0.038, 0.04),
                                         [a + (b - a) * 0.42 for a, b in zip(shoulder, elbow)]),
           s["plate"], "rifle", bevel=0.006)
     # The elbow servo's disc lies across the hinge, so the joint reads as a
     # joint rather than as a kink in a pipe.
-    piece(f"arm.{side}.elbow", kit.rod((ex, ey - 0.013, ez), (ex, ey + 0.013, ez), 0.017, segments=8),
+    piece(f"arm.{side}.elbow", kit.rod((ex, ey - 0.013, ez), (ex, ey + 0.013, ez), 0.017, segments=16),
           s["servo"], "rifle")
-    piece(f"arm.{side}.lower", kit.rod(elbow, hand, 0.014, segments=6, radius_end=0.012), s["servo"], "rifle")
+    piece(f"arm.{side}.lower", kit.rod(elbow, hand, 0.014, segments=12, radius_end=0.012), s["servo"], "rifle")
     cuff = [e + (h - e) * 0.45 for e, h in zip(elbow, hand)]
     piece(f"arm.{side}.vambrace", kit.box((0.05, 0.034, 0.034), cuff), s["plate"], "rifle", bevel=0.005)
     piece(f"arm.{side}.hand", kit.box((0.026, 0.024, 0.022), hand), s["iron"], "rifle", bevel=0.005)

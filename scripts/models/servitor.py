@@ -99,7 +99,7 @@ parts = []
 count = [0]
 
 
-def piece(bm, mat, bone, painted=False, bevel=None, segments=1):
+def piece(bm, mat, bone, painted=False, bevel=None, segments=3):
     count[0] += 1
     obj = kit.rigid_part(f"{bone}.{count[0]}", bm, mat, col, bone, painted=painted)
     if bevel is not None:
@@ -121,27 +121,27 @@ for side, y in (("L", LEG_Y), ("R", -LEG_Y)):
     thigh, shin, foot = f"thigh.{side}", f"shin.{side}", f"foot.{side}"
     out = 1 if side == "L" else -1
 
-    piece(kit.rod((0, y - 0.024 * out, HIP - 0.004), (0, y + 0.03 * out, HIP - 0.004), 0.03, segments=10),
+    piece(kit.rod((0, y - 0.024 * out, HIP - 0.004), (0, y + 0.03 * out, HIP - 0.004), 0.03, segments=20),
           s["servo"], thigh)
-    piece(kit.rod((0, y + 0.028 * out, HIP - 0.004), (0, y + 0.036 * out, HIP - 0.004), 0.015, segments=8),
+    piece(kit.rod((0, y + 0.028 * out, HIP - 0.004), (0, y + 0.036 * out, HIP - 0.004), 0.015, segments=16),
           s["iron"], thigh)
     piece(kit.frustum((0.054, 0.054), (0.062, 0.06), KNEE + 0.006, HIP - 0.008, (0, y)), s["iron"], thigh,
           bevel=0.008)
     box((0.018, 0.062, 0.076), (0.032, y, 0.164), s["plate"], thigh, rot("Y", -6), bevel=0.006)
-    piece(kit.rod((0.006, y + 0.054 * out, HIP - 0.018), (0.004, y + 0.05 * out, KNEE + 0.014), 0.01, segments=6),
+    piece(kit.rod((0.006, y + 0.054 * out, HIP - 0.018), (0.004, y + 0.05 * out, KNEE + 0.014), 0.01, segments=12),
           s["servo"], thigh)
-    piece(kit.rod((0.006, y + 0.054 * out, HIP - 0.03), (0.006, y + 0.054 * out, HIP - 0.008), 0.014, segments=6),
+    piece(kit.rod((0.006, y + 0.054 * out, HIP - 0.03), (0.006, y + 0.054 * out, HIP - 0.008), 0.014, segments=12),
           s["iron"], thigh)
 
-    piece(kit.rod((0, y - 0.032 * out, KNEE), (0, y + 0.036 * out, KNEE), 0.026, segments=10), s["servo"], shin)
+    piece(kit.rod((0, y - 0.032 * out, KNEE), (0, y + 0.036 * out, KNEE), 0.026, segments=20), s["servo"], shin)
     box((0.016, 0.054, 0.036), (0.032, y, KNEE + 0.008), s["plate"], shin, rot("Y", -10), bevel=0.005)
     piece(kit.frustum((0.046, 0.05), (0.054, 0.054), ANKLE + 0.008, KNEE - 0.01, (0, y)), s["iron"], shin,
           bevel=0.007)
     box((0.016, 0.056, 0.062), (0.03, y, 0.076), s["plate"], shin, rot("Y", 4), bevel=0.005)
-    piece(kit.rod((-0.024, y + 0.032 * out, KNEE - 0.012), (-0.02, y + 0.03 * out, ANKLE + 0.012), 0.009, segments=6),
+    piece(kit.rod((-0.024, y + 0.032 * out, KNEE - 0.012), (-0.02, y + 0.03 * out, ANKLE + 0.012), 0.009, segments=12),
           s["servo"], shin)
 
-    piece(kit.rod((0, y - 0.026, ANKLE), (0, y + 0.026, ANKLE), 0.018, segments=8), s["servo"], foot)
+    piece(kit.rod((0, y - 0.026, ANKLE), (0, y + 0.026, ANKLE), 0.018, segments=16), s["servo"], foot)
     # As long as the Conscript's boot, wider: a longer boot's toe dipped under
     # the ground mid-stride, where the sole tilts a degree between keys.
     box((0.088, 0.07, 0.032), (0.016, y, 0.03), s["plate"], foot, bevel=0.007)
@@ -161,7 +161,7 @@ box((0.01, 0.03, 0.022), (0.046, 0, 0.258), s["servo"], "pelvis", bevel=0.004)
 for y in (0.034, -0.034):
     box((0.012, 0.054, 0.054), (0.054, y, 0.214), s["plate"], "pelvis", rot("Y", -14), bevel=0.005)
     box((0.01, 0.052, 0.046), (-0.054, y, 0.22), s["plate"], "pelvis", rot("Y", 12), bevel=0.004)
-    piece(kit.rod((-0.032, y * 1.6, 0.25), (-0.014, y * 1.9, 0.208), 0.007, segments=6), s["rubber"], "pelvis")
+    piece(kit.rod((-0.032, y * 1.6, 0.25), (-0.014, y * 1.9, 0.208), 0.007, segments=12), s["rubber"], "pelvis")
 for y in (0.06, -0.06):
     box((0.028, 0.026, 0.032), (0.014, y * 1.02, 0.242), s["leather"], "pelvis", bevel=0.005)
 
@@ -175,8 +175,8 @@ box((0.022, 0.1, 0.072), (0.056, 0, 0.31), s["paint"], "chest", rot("Y", -7), pa
 box((0.014, 0.104, 0.012), (0.054, 0, 0.274), s["iron"], "chest", rot("Y", -7))
 for z in (0.29, 0.328):
     box((0.01, 0.108, 0.008), (0.046, 0, z), s["servo"], "chest")
-piece(kit.rod((0.03, 0, 0.352), (0.03, 0, 0.372), 0.038, segments=10), s["servo"], "chest")
-piece(kit.rod((0.03, 0, 0.37), (0.03, 0, 0.378), 0.032, segments=8), s["rubber"], "chest")
+piece(kit.rod((0.03, 0, 0.352), (0.03, 0, 0.372), 0.038, segments=20), s["servo"], "chest")
+piece(kit.rod((0.03, 0, 0.37), (0.03, 0, 0.378), 0.032, segments=16), s["rubber"], "chest")
 
 # The backframe the hopper hangs off, and the number plate under it.
 box((0.03, 0.12, 0.11), (-0.06, 0, 0.32), s["iron"], "chest", bevel=0.006)
@@ -198,9 +198,9 @@ box((0.014, 0.2, 0.12), (HX - 0.1, 0, HZ), s["plate"], "chest", bevel=0.005)
 box((0.014, 0.2, 0.09), (HX + 0.1, 0, HZ - 0.015), s["iron"], "chest", bevel=0.005)
 box((0.02, 0.21, 0.012), (HX - 0.1, 0, HZ + 0.066), s["hazard"], "chest")
 for k in range(3):
-    piece(kit.rod((HX - 0.1 + k * 0.1, 0.108, HZ), (HX - 0.1 + k * 0.1, 0.114, HZ), 0.006, segments=5), s["servo"],
+    piece(kit.rod((HX - 0.1 + k * 0.1, 0.108, HZ), (HX - 0.1 + k * 0.1, 0.114, HZ), 0.006, segments=10), s["servo"],
           "chest")
-    piece(kit.rod((HX - 0.1 + k * 0.1, -0.108, HZ), (HX - 0.1 + k * 0.1, -0.114, HZ), 0.006, segments=5), s["servo"],
+    piece(kit.rod((HX - 0.1 + k * 0.1, -0.108, HZ), (HX - 0.1 + k * 0.1, -0.114, HZ), 0.006, segments=10), s["servo"],
           "chest")
 for size, centre, (rx, ry, rz), mat in (
     ((0.07, 0.06, 0.04), (HX - 0.04, 0.04, HZ + 0.07), (12, 25, 30), "iron"),
@@ -217,8 +217,8 @@ box((0.05, 0.11, 0.07), (-0.1, 0, 0.27), s["plate"], "chest", bevel=0.007)
 for y in (0.03, -0.03):
     box((0.008, 0.022, 0.036), (-0.126, y, 0.268), lamp, "chest")
 box((0.006, 0.09, 0.046), (-0.122, 0, 0.268), s["iron"], "chest")
-piece(kit.rod((-0.1, 0.09, 0.3), (-0.09, 0.115, 0.5), 0.012, segments=6), s["iron"], "chest")
-piece(kit.rod((-0.09, 0.115, 0.495), (-0.09, 0.115, 0.505), 0.016, segments=6), s["servo"], "chest")
+piece(kit.rod((-0.1, 0.09, 0.3), (-0.09, 0.115, 0.5), 0.012, segments=12), s["iron"], "chest")
+piece(kit.rod((-0.09, 0.115, 0.495), (-0.09, 0.115, 0.505), 0.016, segments=12), s["servo"], "chest")
 
 # Wired in: cables from the pack up the spine into the hood and the collar.
 for i, path in enumerate((
@@ -227,12 +227,12 @@ for i, path in enumerate((
     [(-0.076, 0.0, 0.3), (-0.04, 0.0, 0.34), (0.0, 0.0, 0.365)],
 )):
     for a, b in zip(path, path[1:]):
-        piece(kit.rod(a, b, 0.006, segments=5), s["rubber"], "chest")
+        piece(kit.rod(a, b, 0.006, segments=10), s["rubber"], "chest")
 
 # Shoulders: the yoke and its servos. No pauldrons -- nobody armoured a hauler.
 for side, sign in (("L", 1), ("R", -1)):
-    piece(kit.rod((0, 0.052 * sign, 0.356), (0, 0.1 * sign, 0.35), 0.028, segments=8), s["servo"], "chest")
-    piece(kit.rod((0, 0.098 * sign, 0.35), (0, 0.118 * sign, 0.35), 0.034, segments=10), s["iron"], "chest")
+    piece(kit.rod((0, 0.052 * sign, 0.356), (0, 0.1 * sign, 0.35), 0.028, segments=16), s["servo"], "chest")
+    piece(kit.rod((0, 0.098 * sign, 0.35), (0, 0.118 * sign, 0.35), 0.034, segments=20), s["iron"], "chest")
     box((0.06, 0.03, 0.05), (0.0, 0.122 * sign, 0.33), s["plate"], "chest", rot("X", -12 * sign), bevel=0.006)
 
 # ---------------------------------------------------------------------------
@@ -240,15 +240,15 @@ for side, sign in (("L", 1), ("R", -1)):
 # the back.
 # ---------------------------------------------------------------------------
 
-box((0.064, 0.066, 0.058), (0.04, 0, 0.41), s["plate"], "head", bevel=0.016, segments=2)
-piece(kit.ellipsoid((0.033, 0.034, 0.02), (0.038, 0, 0.436), segments=8, rings=4), s["iron"], "head")
+box((0.064, 0.066, 0.058), (0.04, 0, 0.41), s["plate"], "head", bevel=0.016, segments=4)
+piece(kit.ellipsoid((0.033, 0.034, 0.02), (0.038, 0, 0.436), segments=16, rings=8), s["iron"], "head")
 box((0.016, 0.06, 0.05), (0.076, 0, 0.408), s["plate"], "head", rot("Y", -12), bevel=0.005)
 box((0.01, 0.056, 0.012), (0.084, 0, 0.42), s["iron"], "head", rot("Y", -16))
 box((0.006, 0.048, 0.011), (0.085, 0, 0.412), lamp, "head")
-piece(kit.rod((0.072, 0, 0.386), (0.092, 0, 0.384), 0.014, segments=8), s["servo"], "head")
+piece(kit.rod((0.072, 0, 0.386), (0.092, 0, 0.384), 0.014, segments=16), s["servo"], "head")
 for y in (0.035, -0.035):
     box((0.026, 0.008, 0.026), (0.04, y, 0.406), s["servo"], "head", bevel=0.004)
-    piece(kit.rod((0.01, y * 0.8, 0.4), (0.02, y * 0.8, 0.4), 0.009, segments=6), s["rubber"], "head")
+    piece(kit.rod((0.01, y * 0.8, 0.4), (0.02, y * 0.8, 0.4), 0.009, segments=12), s["rubber"], "head")
 
 # ---------------------------------------------------------------------------
 # The arms: the frame's servo tubes with plate sleeves, ending in the tools.
@@ -256,13 +256,13 @@ for y in (0.035, -0.035):
 
 
 def arm(bone, shoulder, elbow, hand):
-    piece(kit.rod(shoulder, elbow, 0.019, segments=6, radius_end=0.016), s["servo"], bone)
+    piece(kit.rod(shoulder, elbow, 0.019, segments=12, radius_end=0.016), s["servo"], bone)
     box((0.036, 0.04, 0.042), shoulder.lerp(elbow, 0.42), s["plate"], bone, bevel=0.006)
-    piece(kit.rod(elbow + Vector((0, -0.014, 0)), elbow + Vector((0, 0.014, 0)), 0.018, segments=8), s["servo"], bone)
-    piece(kit.rod(elbow, hand, 0.015, segments=6, radius_end=0.013), s["servo"], bone)
+    piece(kit.rod(elbow + Vector((0, -0.014, 0)), elbow + Vector((0, 0.014, 0)), 0.018, segments=16), s["servo"], bone)
+    piece(kit.rod(elbow, hand, 0.015, segments=12, radius_end=0.013), s["servo"], bone)
     box((0.05, 0.036, 0.036), elbow.lerp(hand, 0.45), s["plate"], bone, bevel=0.005)
     ram_a = shoulder + Vector((0.02, 0.018 * (1 if shoulder.y > 0 else -1), -0.02))
-    piece(kit.rod(ram_a, elbow.lerp(hand, 0.2), 0.008, segments=6), s["servo"], bone)
+    piece(kit.rod(ram_a, elbow.lerp(hand, 0.2), 0.008, segments=12), s["servo"], bone)
 
 
 # The cutter: a disc saw in a guard on the left, leading.
@@ -271,9 +271,9 @@ box((0.05, 0.05, 0.05), (0.25, 0.1, 0.18), s["iron"], "cutter.arm", bevel=0.006)
 box((0.09, 0.032, 0.03), (CUTTER.x + 0.01, CUTTER.y, CUTTER.z + 0.05), s["paint"], "cutter.arm", rot("Y", 6),
     painted=True, bevel=0.004)
 box((0.02, 0.03, 0.02), (0.235, 0.1, 0.21), lamp, "cutter.arm")
-piece(kit.rod((CUTTER.x, CUTTER.y - 0.006, CUTTER.z), (CUTTER.x, CUTTER.y + 0.006, CUTTER.z), 0.058, segments=16),
+piece(kit.rod((CUTTER.x, CUTTER.y - 0.006, CUTTER.z), (CUTTER.x, CUTTER.y + 0.006, CUTTER.z), 0.058, segments=32),
       s["iron"], "cutter")
-piece(kit.rod((CUTTER.x, CUTTER.y - 0.012, CUTTER.z), (CUTTER.x, CUTTER.y + 0.012, CUTTER.z), 0.018, segments=8),
+piece(kit.rod((CUTTER.x, CUTTER.y - 0.012, CUTTER.z), (CUTTER.x, CUTTER.y + 0.012, CUTTER.z), 0.018, segments=16),
       s["servo"], "cutter")
 for k in range(10):
     a = k * 36
@@ -282,7 +282,7 @@ for k in range(10):
 
 # The grapple: three fingers on a wrist servo, on the right.
 arm("claw.arm", Vector((0, -0.1, SHOULDER_Z)), Vector((0.1, -0.14, 0.3)), Vector((0.18, -0.11, 0.19)))
-piece(kit.rod((0.18, -0.126, 0.18), (0.18, -0.094, 0.18), 0.02, segments=8), s["servo"], "claw.arm")
+piece(kit.rod((0.18, -0.126, 0.18), (0.18, -0.094, 0.18), 0.02, segments=16), s["servo"], "claw.arm")
 for a in (-40, 0, 40):
     turn = rot("Y", a)
     root = Vector((0.19, -0.11, 0.17))

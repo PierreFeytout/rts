@@ -104,7 +104,7 @@ parts = []
 count = [0]
 
 
-def piece(bm, mat, bone, painted=False, bevel=None, segments=1):
+def piece(bm, mat, bone, painted=False, bevel=None, segments=3):
     count[0] += 1
     obj = kit.rigid_part(f"{bone}.{count[0]}", bm, mat, col, bone, painted=painted)
     if bevel is not None:
@@ -146,7 +146,7 @@ for sy in (1, -1):
     for cx, lx, lean in ((0.2, 0.34, 8), (-0.2, 0.36, 10), (-0.52, 0.16, 6)):
         box((lx, 0.03, 0.15), (cx, y, 0.21), s["paint"], "hull", rot("X", -lean * sy), painted=True, bevel=0.006)
         for dx in (-lx * 0.35, 0.0, lx * 0.35):
-            piece(kit.rod((cx + dx, y + sy * 0.014, 0.26), (cx + dx, y + sy * 0.024, 0.26), 0.008, segments=5),
+            piece(kit.rod((cx + dx, y + sy * 0.014, 0.26), (cx + dx, y + sy * 0.024, 0.26), 0.008, segments=10),
                   s["servo"], "hull")
     # A patch welded over something that went through.
     box((0.12, 0.02, 0.09), (0.05, y + sy * 0.01, 0.19), s["plate"], "hull", rot("X", -9 * sy) @ rot("Z", 12),
@@ -182,7 +182,7 @@ for name, (x, y) in FANS.items():
         box((0.03, 0.082, 0.085), p, s["iron"], "hull", rot("Z", a))
     # The duct's floor, dark, and nothing over its mouth but the bars: a rod
     # is a solid cylinder, and a lip drawn as one capped the whole duct.
-    piece(kit.rod((x, y, DECK + 0.005), (x, y, DECK + 0.015), FAN_R + 0.01, segments=14), s["rubber"], "hull")
+    piece(kit.rod((x, y, DECK + 0.005), (x, y, DECK + 0.015), FAN_R + 0.01, segments=28), s["rubber"], "hull")
     for k in range(14):
         a = k * 360 / 14
         p = Vector((x + math.cos(math.radians(a)) * (FAN_R + 0.03), y + math.sin(math.radians(a)) * (FAN_R + 0.03),
@@ -193,7 +193,7 @@ for name, (x, y) in FANS.items():
         half = math.sqrt(max(FAN_R * FAN_R - dy * dy, 0.0)) + 0.025
         piece(kit.beam((x - half, y + dy, DECK + 0.08), (x + half, y + dy, DECK + 0.08), 0.012, width=0.02),
               s["grate"], "hull")
-    piece(kit.rod((x, y, DECK + 0.01), (x, y, DECK + 0.06), 0.035, segments=8), s["servo"], name)
+    piece(kit.rod((x, y, DECK + 0.01), (x, y, DECK + 0.06), 0.035, segments=16), s["servo"], name)
     for k in range(4):
         a = math.radians(k * 90)
         tip = Vector((math.cos(a), math.sin(a), 0)) * (FAN_R - 0.01)
@@ -213,7 +213,7 @@ for y in (-0.36, 0.36):
     piece(kit.beam((X0 + 0.02, y, 0.14), (X0 - 0.06, y, 0.14), 0.03, width=0.05), s["iron"], "hull", bevel=0.005)
     box((0.03, 0.05, 0.04), (X0 - 0.07, y, 0.14), s["hazard"], "hull")
 for x in (-0.4, -0.15):
-    piece(kit.rod((x, Y0 - 0.005, 0.12), (x, Y1 + 0.005, 0.12), 0.012, segments=6), s["iron"], "hull")
+    piece(kit.rod((x, Y0 - 0.005, 0.12), (x, Y1 + 0.005, 0.12), 0.012, segments=12), s["iron"], "hull")
 
 # ---------------------------------------------------------------------------
 # The mortar in its housing, on recoil rams, and its charges on the flanks.
@@ -222,29 +222,29 @@ for x in (-0.4, -0.15):
 box((0.34, 0.4, 0.15), (0.26, 0, DECK + 0.075), s["plate"], "hull", bevel=0.01)
 box((0.3, 0.36, 0.024), (0.26, 0, DECK + 0.16), s["paint"], "hull", painted=True, bevel=0.005)
 for x, y in ((0.14, -0.15), (0.14, 0.15), (0.38, -0.15), (0.38, 0.15)):
-    piece(kit.rod((x, y, DECK + 0.17), (x, y, DECK + 0.182), 0.012, segments=6), s["servo"], "hull")
+    piece(kit.rod((x, y, DECK + 0.17), (x, y, DECK + 0.182), 0.012, segments=12), s["servo"], "hull")
 box((0.04, 0.24, 0.12), (0.44, 0, GUN_Z), s["iron"], "hull", bevel=0.006)
 for sy in (1, -1):
-    piece(kit.rod((0.3, sy * 0.13, GUN_Z + 0.03), (0.48, sy * 0.13, GUN_Z + 0.02), 0.022, segments=8), s["iron"],
+    piece(kit.rod((0.3, sy * 0.13, GUN_Z + 0.03), (0.48, sy * 0.13, GUN_Z + 0.02), 0.022, segments=16), s["iron"],
           "hull")
-    piece(kit.rod((0.46, sy * 0.13, GUN_Z + 0.02), (0.6, sy * 0.13, GUN_Z + 0.01), 0.013, segments=6), s["servo"],
+    piece(kit.rod((0.46, sy * 0.13, GUN_Z + 0.02), (0.6, sy * 0.13, GUN_Z + 0.01), 0.013, segments=12), s["servo"],
           "gun")
     box((0.04, 0.03, 0.05), (0.6, sy * 0.13, GUN_Z), s["iron"], "gun", bevel=0.004)
-piece(kit.rod((0.36, 0, GUN_Z), (0.78, 0, GUN_Z), 0.055, segments=12), s["iron"], "gun")
-piece(kit.rod((0.5, 0, GUN_Z), (0.56, 0, GUN_Z), 0.062, segments=12), s["plate"], "gun", bevel=0.004)
-piece(kit.rod((0.66, 0, GUN_Z), (0.7, 0, GUN_Z), 0.06, segments=12), s["hazard"], "gun")
-piece(kit.rod((0.77, 0, GUN_Z), (0.82, 0, GUN_Z), 0.068, segments=12, radius_end=0.062), s["iron"], "gun",
+piece(kit.rod((0.36, 0, GUN_Z), (0.78, 0, GUN_Z), 0.055, segments=24), s["iron"], "gun")
+piece(kit.rod((0.5, 0, GUN_Z), (0.56, 0, GUN_Z), 0.062, segments=24), s["plate"], "gun", bevel=0.004)
+piece(kit.rod((0.66, 0, GUN_Z), (0.7, 0, GUN_Z), 0.06, segments=24), s["hazard"], "gun")
+piece(kit.rod((0.77, 0, GUN_Z), (0.82, 0, GUN_Z), 0.068, segments=24, radius_end=0.062), s["iron"], "gun",
       bevel=0.004)
-piece(kit.rod((0.815, 0, GUN_Z), (0.822, 0, GUN_Z), 0.042, segments=10), lamp, "gun")
+piece(kit.rod((0.815, 0, GUN_Z), (0.822, 0, GUN_Z), 0.042, segments=20), lamp, "gun")
 box((0.1, 0.06, 0.05), (0.42, 0, GUN_Z + 0.09), s["plate"], "gun", bevel=0.004)
 box((0.006, 0.04, 0.03), (0.472, 0, GUN_Z + 0.09), lamp, "gun")
 
 # Charge canisters racked on both flanks of the housing, each banded ember.
 for sy in (1, -1):
     for x in (0.16, 0.24, 0.32):
-        piece(kit.rod((x, sy * 0.22, DECK + 0.04), (x, sy * 0.22, DECK + 0.14), 0.028, segments=8), s["iron"], "hull")
-        piece(kit.rod((x, sy * 0.22, DECK + 0.085), (x, sy * 0.22, DECK + 0.1), 0.03, segments=8), lamp, "hull")
-        piece(kit.rod((x, sy * 0.22, DECK + 0.14), (x, sy * 0.22, DECK + 0.155), 0.018, segments=6), s["rubber"],
+        piece(kit.rod((x, sy * 0.22, DECK + 0.04), (x, sy * 0.22, DECK + 0.14), 0.028, segments=16), s["iron"], "hull")
+        piece(kit.rod((x, sy * 0.22, DECK + 0.085), (x, sy * 0.22, DECK + 0.1), 0.03, segments=16), lamp, "hull")
+        piece(kit.rod((x, sy * 0.22, DECK + 0.14), (x, sy * 0.22, DECK + 0.155), 0.018, segments=12), s["rubber"],
               "hull")
     piece(kit.beam((0.11, sy * 0.25, DECK + 0.12), (0.37, sy * 0.25, DECK + 0.12), 0.012), s["hazard"], "hull")
 
@@ -252,9 +252,9 @@ for sy in (1, -1):
 # The crew hatch, the aerials, and the number.
 # ---------------------------------------------------------------------------
 
-piece(kit.rod((HATCH.x, HATCH.y, DECK + 0.02), (HATCH.x, HATCH.y, DECK + 0.05), 0.1, segments=12), s["iron"],
+piece(kit.rod((HATCH.x, HATCH.y, DECK + 0.02), (HATCH.x, HATCH.y, DECK + 0.05), 0.1, segments=24), s["iron"],
       "hull", bevel=0.006)
-piece(kit.rod((HATCH.x, HATCH.y, DECK + 0.05), (HATCH.x, HATCH.y, DECK + 0.07), 0.085, segments=12), s["plate"],
+piece(kit.rod((HATCH.x, HATCH.y, DECK + 0.05), (HATCH.x, HATCH.y, DECK + 0.07), 0.085, segments=24), s["plate"],
       "hatch", bevel=0.005)
 piece(kit.beam((HATCH.x - 0.05, HATCH.y, DECK + 0.085), (HATCH.x + 0.05, HATCH.y, DECK + 0.085), 0.014), s["iron"],
       "hatch")
@@ -264,8 +264,8 @@ box((0.1, 0.008, 0.05), (-0.36, Y1 + 0.03, 0.2), s["ceramic"], "hull")
 for sy, top in ((1, 0.62), (-1, 0.54)):
     base = Vector((-0.55, sy * 0.3, DECK + 0.02))
     box((0.03, 0.03, 0.03), base, s["iron"], "hull")
-    piece(kit.rod(base, (base.x - 0.02, base.y, top), 0.005, segments=5), s["iron"], "hull")
-    piece(kit.rod((base.x - 0.02, base.y, top), (base.x - 0.021, base.y, top + 0.012), 0.008, segments=5), lamp,
+    piece(kit.rod(base, (base.x - 0.02, base.y, top), 0.005, segments=10), s["iron"], "hull")
+    piece(kit.rod((base.x - 0.02, base.y, top), (base.x - 0.021, base.y, top + 0.012), 0.008, segments=10), lamp,
           "hull")
 
 kit.ground_check(parts)

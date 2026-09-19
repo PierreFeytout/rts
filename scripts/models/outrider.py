@@ -99,7 +99,7 @@ parts = []
 count = [0]
 
 
-def piece(bm, mat, bone, painted=False, bevel=None, segments=1):
+def piece(bm, mat, bone, painted=False, bevel=None, segments=3):
     count[0] += 1
     obj = kit.rigid_part(f"{bone}.{count[0]}", bm, mat, col, bone, painted=painted)
     if bevel is not None:
@@ -115,27 +115,27 @@ def box(size, centre, mat, bone, rotation=None, **kw):
 def wheel(bone, centre, radius, width, treads):
     """A fat off-road wheel: tyre, tread blocks round it, rim and hub."""
     c = Vector(centre)
-    piece(kit.rod(c + Vector((0, -width / 2, 0)), c + Vector((0, width / 2, 0)), radius, segments=14), s["rubber"],
+    piece(kit.rod(c + Vector((0, -width / 2, 0)), c + Vector((0, width / 2, 0)), radius, segments=28), s["rubber"],
           bone)
     for k in range(treads):
         a = k * 360 / treads
         p = c + Vector((math.cos(math.radians(a)) * (radius - 0.002), 0, math.sin(math.radians(a)) * (radius - 0.002)))
         box((0.026, width + 0.006, 0.018), p, s["rubber"], bone, rot("Y", -a))
     piece(kit.rod(c + Vector((0, -width / 2 - 0.004, 0)), c + Vector((0, width / 2 + 0.004, 0)), radius * 0.62,
-                  segments=10), s["iron"], bone)
+                  segments=20), s["iron"], bone)
     piece(kit.rod(c + Vector((0, -width / 2 - 0.012, 0)), c + Vector((0, width / 2 + 0.012, 0)), radius * 0.26,
-                  segments=8), s["servo"], bone)
+                  segments=16), s["servo"], bone)
     for k in range(5):
         a = math.radians(k * 72)
         p = c + Vector((math.cos(a) * radius * 0.42, width / 2 + 0.008, math.sin(a) * radius * 0.42))
-        piece(kit.rod(p, p + Vector((0, 0.006, 0)), 0.006, segments=5), s["servo"], bone)
+        piece(kit.rod(p, p + Vector((0, 0.006, 0)), 0.006, segments=10), s["servo"], bone)
 
 
 # ---------------------------------------------------------------------------
 # The front wheel, its fork, and the issued cowl over it.
 # ---------------------------------------------------------------------------
 
-wheel("wheel.F", FRONT, WHEEL_R, 0.08, 10)
+wheel("wheel.F", FRONT, WHEEL_R, 0.08, 20)
 
 for sy in (1, -1):
     top = Vector((CROWN.x, sy * 0.06, CROWN.z))
@@ -143,10 +143,10 @@ for sy in (1, -1):
     piece(kit.beam(top, axle, 0.02, width=0.016), s["iron"], "fork", bevel=0.004)
     # The ram that lets the wheel work over clinker, outside the blade.
     piece(kit.rod(top + Vector((0.02, sy * 0.012, -0.02)), axle.lerp(top, 0.35) + Vector((0.016, sy * 0.012, 0)),
-                  0.009, segments=6), s["servo"], "fork")
-    piece(kit.rod(top + Vector((0.02, sy * 0.012, -0.03)), top + Vector((0.02, sy * 0.012, 0.0)), 0.013, segments=6),
+                  0.009, segments=12), s["servo"], "fork")
+    piece(kit.rod(top + Vector((0.02, sy * 0.012, -0.03)), top + Vector((0.02, sy * 0.012, 0.0)), 0.013, segments=12),
           s["iron"], "fork")
-    piece(kit.rod(axle + Vector((0, sy * 0.01, 0)), axle + Vector((0, sy * 0.022, 0)), 0.014, segments=6),
+    piece(kit.rod(axle + Vector((0, sy * 0.01, 0)), axle + Vector((0, sy * 0.022, 0)), 0.014, segments=12),
           s["iron"], "fork")
 box((0.05, 0.15, 0.03), CROWN, s["iron"], "fork", bevel=0.006)
 # The cowl: three plates over the wheel, issued and painted, with the lamp
@@ -161,12 +161,12 @@ box((0.008, 0.042, 0.022), (FRONT.x + 0.078, 0, FRONT.z + WHEEL_R + 0.04), lamp,
 # Handlebars, risers and grips.
 for sy in (1, -1):
     piece(kit.rod((CROWN.x, sy * 0.04, CROWN.z + 0.015), (CROWN.x + 0.01, sy * 0.05, CROWN.z + 0.05), 0.009,
-                  segments=6), s["iron"], "fork")
-piece(kit.rod((CROWN.x + 0.01, -0.15, CROWN.z + 0.05), (CROWN.x + 0.01, 0.15, CROWN.z + 0.05), 0.008, segments=6),
+                  segments=12), s["iron"], "fork")
+piece(kit.rod((CROWN.x + 0.01, -0.15, CROWN.z + 0.05), (CROWN.x + 0.01, 0.15, CROWN.z + 0.05), 0.008, segments=12),
       s["iron"], "fork")
 for sy in (1, -1):
     piece(kit.rod((CROWN.x + 0.01, sy * 0.1, CROWN.z + 0.05), (CROWN.x + 0.01, sy * 0.155, CROWN.z + 0.05), 0.011,
-                  segments=6), s["rubber"], "fork")
+                  segments=12), s["rubber"], "fork")
     box((0.02, 0.016, 0.03), (CROWN.x + 0.03, sy * 0.115, CROWN.z + 0.04), s["servo"], "fork", rot("X", sy * 20))
 
 # ---------------------------------------------------------------------------
@@ -187,24 +187,24 @@ for sy in (1, -1):
 # past the rider and a heat shield where a leg would touch it.
 box((0.14, 0.12, 0.12), (-0.09, 0, 0.15), s["iron"], "hull", bevel=0.008)
 for sy in (1, -1):
-    piece(kit.rod((-0.12, sy * 0.06, 0.17), (-0.03, sy * 0.1, 0.17), 0.03, segments=8), s["servo"], "hull")
-    piece(kit.rod((-0.03, sy * 0.1, 0.17), (-0.01, sy * 0.1, 0.17), 0.034, segments=8), s["iron"], "hull")
+    piece(kit.rod((-0.12, sy * 0.06, 0.17), (-0.03, sy * 0.1, 0.17), 0.03, segments=16), s["servo"], "hull")
+    piece(kit.rod((-0.03, sy * 0.1, 0.17), (-0.01, sy * 0.1, 0.17), 0.034, segments=16), s["iron"], "hull")
 for k in range(3):
     box((0.11, 0.1, 0.006), (-0.09, 0, 0.215 + k * 0.012), s["ceramic"], "hull")
-piece(kit.rod((-0.1, -0.11, 0.13), (-0.2, -0.14, 0.15), 0.013, segments=7), s["iron"], "hull")
-piece(kit.rod((-0.2, -0.14, 0.15), (-0.27, -0.13, 0.36), 0.013, segments=7), s["iron"], "hull")
-piece(kit.rod((-0.27, -0.13, 0.36), (-0.3, -0.13, 0.4), 0.017, segments=7), s["iron"], "hull")
-piece(kit.rod((-0.3, -0.13, 0.395), (-0.305, -0.13, 0.404), 0.013, segments=7), s["rubber"], "hull")
+piece(kit.rod((-0.1, -0.11, 0.13), (-0.2, -0.14, 0.15), 0.013, segments=14), s["iron"], "hull")
+piece(kit.rod((-0.2, -0.14, 0.15), (-0.27, -0.13, 0.36), 0.013, segments=14), s["iron"], "hull")
+piece(kit.rod((-0.27, -0.13, 0.36), (-0.3, -0.13, 0.4), 0.017, segments=14), s["iron"], "hull")
+piece(kit.rod((-0.3, -0.13, 0.395), (-0.305, -0.13, 0.404), 0.013, segments=14), s["rubber"], "hull")
 box((0.08, 0.016, 0.07), (-0.16, -0.155, 0.19), s["ceramic"], "hull", rot("Y", -10), bevel=0.004)
 
 # Rear wheels on their swingarms, with a ram to each.
 for bone, sy in (("wheel.L", 1), ("wheel.R", -1)):
-    wheel(bone, (REAR_X, sy * REAR_Y, REAR_Z), REAR_R, 0.07, 8)
+    wheel(bone, (REAR_X, sy * REAR_Y, REAR_Z), REAR_R, 0.07, 16)
     axle = Vector((REAR_X, sy * (REAR_Y - 0.05), REAR_Z))
     piece(kit.beam((-0.06, sy * 0.13, 0.15), axle, 0.022, width=0.016), s["iron"], "hull", bevel=0.004)
-    piece(kit.rod((-0.12, sy * 0.15, 0.25), axle + Vector((0.02, 0, 0.02)), 0.009, segments=6), s["servo"], "hull")
-    piece(kit.rod((-0.12, sy * 0.15, 0.22), (-0.12, sy * 0.15, 0.26), 0.013, segments=6), s["iron"], "hull")
-    piece(kit.rod(axle, axle + Vector((0, sy * 0.06, 0)), 0.012, segments=6), s["iron"], "hull")
+    piece(kit.rod((-0.12, sy * 0.15, 0.25), axle + Vector((0.02, 0, 0.02)), 0.009, segments=12), s["servo"], "hull")
+    piece(kit.rod((-0.12, sy * 0.15, 0.22), (-0.12, sy * 0.15, 0.26), 0.013, segments=12), s["iron"], "hull")
+    piece(kit.rod(axle, axle + Vector((0, sy * 0.06, 0)), 0.012, segments=12), s["iron"], "hull")
 
 # The bed: a plate deck, painted side plates, a hazard edge at the back, the
 # drum, the toolbox, and the contract number where the officer reads it.
@@ -212,14 +212,14 @@ box((0.2, 0.3, 0.02), (-0.27, 0, 0.2), s["plate"], "hull", bevel=0.005)
 for sy in (1, -1):
     box((0.2, 0.012, 0.06), (-0.27, sy * 0.155, 0.23), s["paint"], "hull", painted=True, bevel=0.004)
     for x in (-0.34, -0.27, -0.2):
-        piece(kit.rod((x, sy * 0.158, 0.24), (x, sy * 0.166, 0.24), 0.005, segments=5), s["servo"], "hull")
+        piece(kit.rod((x, sy * 0.158, 0.24), (x, sy * 0.166, 0.24), 0.005, segments=10), s["servo"], "hull")
 box((0.014, 0.3, 0.05), (-0.372, 0, 0.225), s["hazard"], "hull")
 box((0.06, 0.05, 0.03), (-0.39, 0, 0.19), s["iron"], "hull", bevel=0.005)
 box((0.008, 0.09, 0.05), (-0.378, 0.1, 0.24), s["ceramic"], "hull")
-piece(kit.rod((-0.28, 0.07, 0.21), (-0.28, 0.07, 0.33), 0.048, segments=10), s["plate"], "hull", bevel=0.005)
-piece(kit.rod((-0.28, 0.07, 0.255), (-0.28, 0.07, 0.275), 0.05, segments=10), s["hazard"], "hull")
-piece(kit.rod((-0.28, 0.07, 0.33), (-0.28, 0.07, 0.34), 0.03, segments=8), s["iron"], "hull")
-piece(kit.rod((-0.28, 0.07, 0.34), (-0.28, 0.07, 0.35), 0.014, segments=6), s["rubber"], "hull")
+piece(kit.rod((-0.28, 0.07, 0.21), (-0.28, 0.07, 0.33), 0.048, segments=20), s["plate"], "hull", bevel=0.005)
+piece(kit.rod((-0.28, 0.07, 0.255), (-0.28, 0.07, 0.275), 0.05, segments=20), s["hazard"], "hull")
+piece(kit.rod((-0.28, 0.07, 0.33), (-0.28, 0.07, 0.34), 0.03, segments=16), s["iron"], "hull")
+piece(kit.rod((-0.28, 0.07, 0.34), (-0.28, 0.07, 0.35), 0.014, segments=12), s["rubber"], "hull")
 for z in (0.23, 0.31):
     box((0.11, 0.11, 0.008), (-0.28, 0.07, z), s["leather"], "hull")
 box((0.1, 0.09, 0.06), (-0.25, -0.09, 0.24), s["iron"], "hull", bevel=0.005)
@@ -227,7 +227,7 @@ box((0.1, 0.09, 0.008), (-0.25, -0.09, 0.274), s["plate"], "hull", bevel=0.003)
 box((0.02, 0.07, 0.01), (-0.25, -0.09, 0.28), s["hazard"], "hull")
 # The seat, on its post.
 box((0.14, 0.09, 0.03), (SEAT.x, 0, SEAT.z - 0.01), s["leather"], "hull", bevel=0.006)
-piece(kit.rod((SEAT.x, 0, 0.22), (SEAT.x, 0, SEAT.z - 0.02), 0.014, segments=6), s["servo"], "hull")
+piece(kit.rod((SEAT.x, 0, 0.22), (SEAT.x, 0, SEAT.z - 0.02), 0.014, segments=12), s["servo"], "hull")
 
 # ---------------------------------------------------------------------------
 # The survey mast and its beacon: the tallest thing on the trike, and the
@@ -235,31 +235,31 @@ piece(kit.rod((SEAT.x, 0, 0.22), (SEAT.x, 0, SEAT.z - 0.02), 0.014, segments=6),
 # ---------------------------------------------------------------------------
 
 box((0.05, 0.05, 0.04), (MAST.x, MAST.y, 0.27), s["iron"], "hull", bevel=0.005)
-piece(kit.rod((MAST.x, MAST.y, 0.28), (MAST.x, MAST.y, 0.7), 0.008, segments=6), s["iron"], "mast")
+piece(kit.rod((MAST.x, MAST.y, 0.28), (MAST.x, MAST.y, 0.7), 0.008, segments=12), s["iron"], "mast")
 piece(kit.beam((MAST.x, MAST.y - 0.06, 0.6), (MAST.x, MAST.y + 0.06, 0.6), 0.01), s["iron"], "mast")
 box((0.04, 0.04, 0.05), (MAST.x, MAST.y, 0.5), s["plate"], "mast", bevel=0.004)
 box((0.006, 0.03, 0.02), (MAST.x + 0.022, MAST.y, 0.5), lamp, "mast")
-piece(kit.rod((MAST.x, MAST.y + 0.05, 0.6), (MAST.x, MAST.y + 0.05, 0.82), 0.003, segments=4), s["iron"], "mast")
-piece(kit.rod((MAST.x, MAST.y, 0.7), (MAST.x, MAST.y, 0.71), 0.016, segments=8), s["iron"], "mast")
-piece(kit.ellipsoid((0.02, 0.02, 0.022), (MAST.x, MAST.y, 0.73), segments=8, rings=5), lamp, "beacon")
+piece(kit.rod((MAST.x, MAST.y + 0.05, 0.6), (MAST.x, MAST.y + 0.05, 0.82), 0.003, segments=8), s["iron"], "mast")
+piece(kit.rod((MAST.x, MAST.y, 0.7), (MAST.x, MAST.y, 0.71), 0.016, segments=16), s["iron"], "mast")
+piece(kit.ellipsoid((0.02, 0.02, 0.022), (MAST.x, MAST.y, 0.73), segments=16, rings=10), lamp, "beacon")
 box((0.012, 0.05, 0.036), (MAST.x - 0.02, MAST.y, 0.735), s["iron"], "beacon")
 
 # ---------------------------------------------------------------------------
 # The rivet driver on its pintle over the bars.
 # ---------------------------------------------------------------------------
 
-piece(kit.rod((0.12, 0, 0.34), (0.12, 0, GUN_Z - 0.02), 0.012, segments=6), s["servo"], "hull")
-piece(kit.rod((0.12, 0, GUN_Z - 0.02), (0.12, 0, GUN_Z), 0.016, segments=8), s["iron"], "gun")
+piece(kit.rod((0.12, 0, 0.34), (0.12, 0, GUN_Z - 0.02), 0.012, segments=12), s["servo"], "hull")
+piece(kit.rod((0.12, 0, GUN_Z - 0.02), (0.12, 0, GUN_Z), 0.016, segments=16), s["iron"], "gun")
 box((0.13, 0.03, 0.04), (0.2, 0, GUN_Z), s["plate"], "gun", bevel=0.004)
 box((0.1, 0.026, 0.01), (0.2, 0, GUN_Z + 0.025), s["iron"], "gun")
-piece(kit.rod((0.17, -0.015, GUN_Z - 0.032), (0.17, 0.015, GUN_Z - 0.032), 0.024, segments=10), s["iron"], "gun")
-piece(kit.rod((0.17, -0.019, GUN_Z - 0.032), (0.17, 0.019, GUN_Z - 0.032), 0.009, segments=6), s["servo"], "gun")
-piece(kit.rod((0.26, 0, GUN_Z + 0.004), (0.35, 0, GUN_Z + 0.004), 0.014, segments=10), s["iron"], "gun")
+piece(kit.rod((0.17, -0.015, GUN_Z - 0.032), (0.17, 0.015, GUN_Z - 0.032), 0.024, segments=20), s["iron"], "gun")
+piece(kit.rod((0.17, -0.019, GUN_Z - 0.032), (0.17, 0.019, GUN_Z - 0.032), 0.009, segments=12), s["servo"], "gun")
+piece(kit.rod((0.26, 0, GUN_Z + 0.004), (0.35, 0, GUN_Z + 0.004), 0.014, segments=20), s["iron"], "gun")
 for x in (0.275, 0.295):
     box((0.012, 0.02, 0.008), (x, 0, GUN_Z + 0.018), s["rubber"], "gun")
 for x in (0.32, 0.34):
-    piece(kit.rod((x - 0.004, 0, GUN_Z + 0.004), (x + 0.004, 0, GUN_Z + 0.004), 0.018, segments=8), lamp, "gun")
-piece(kit.rod((0.35, 0, GUN_Z + 0.004), (0.43, 0, GUN_Z + 0.004), 0.008, segments=8), s["servo"], "gun")
+    piece(kit.rod((x - 0.004, 0, GUN_Z + 0.004), (x + 0.004, 0, GUN_Z + 0.004), 0.018, segments=16), lamp, "gun")
+piece(kit.rod((0.35, 0, GUN_Z + 0.004), (0.43, 0, GUN_Z + 0.004), 0.008, segments=16), s["servo"], "gun")
 box((0.028, 0.024, 0.024), (0.44, 0, GUN_Z + 0.004), s["iron"], "gun", bevel=0.004)
 box((0.04, 0.018, 0.016), (0.22, 0, GUN_Z + 0.04), s["plate"], "gun", bevel=0.003)
 box((0.005, 0.012, 0.01), (0.242, 0, GUN_Z + 0.04), lamp, "gun")
@@ -275,7 +275,7 @@ for sy in (1, -1):
     y = sy * 0.07
     piece(kit.beam((SEAT.x - 0.02, y, SEAT.z), (0.05, sy * 0.1, 0.19), 0.04), s["iron"], "hull", bevel=0.005)
     box((0.014, 0.05, 0.07), (0.0, sy * 0.1, 0.24), s["plate"], "hull", rot("Y", -40), bevel=0.004)
-    piece(kit.rod((0.05, sy * 0.08, 0.19), (0.05, sy * 0.125, 0.19), 0.02, segments=8), s["servo"], "hull")
+    piece(kit.rod((0.05, sy * 0.08, 0.19), (0.05, sy * 0.125, 0.19), 0.02, segments=16), s["servo"], "hull")
     piece(kit.beam((0.05, sy * 0.1, 0.19), (0.02, sy * 0.115, 0.125), 0.032), s["iron"], "hull", bevel=0.004)
     box((0.012, 0.046, 0.055), (0.05, sy * 0.115, 0.155), s["plate"], "hull", rot("Y", 6), bevel=0.003)
     box((0.08, 0.05, 0.028), (0.03, sy * 0.115, 0.125), s["plate"], "hull", bevel=0.005)
@@ -288,37 +288,37 @@ box((0.012, 0.086, 0.07), (-0.07, 0, 0.35), s["ceramic"], "rider", rot("Y", -40)
 box((0.04, 0.1, 0.07), (-0.1, 0, 0.36), s["plate"], "rider", rot("Y", -40), bevel=0.006)
 for y in (0.03, -0.03):
     box((0.008, 0.02, 0.04), (-0.122, y, 0.35), lamp, "rider", rot("Y", -40))
-    piece(kit.rod((-0.1, y * 1.5, 0.39), (-0.115, y * 1.5, 0.43), 0.01, segments=6), s["iron"], "rider")
-piece(kit.rod((0.04, 0, 0.4), (0.05, 0, 0.42), 0.034, segments=10), s["servo"], "rider")
-piece(kit.rod((0.05, 0, 0.42), (0.052, 0, 0.428), 0.028, segments=8), s["rubber"], "rider")
+    piece(kit.rod((-0.1, y * 1.5, 0.39), (-0.115, y * 1.5, 0.43), 0.01, segments=12), s["iron"], "rider")
+piece(kit.rod((0.04, 0, 0.4), (0.05, 0, 0.42), 0.034, segments=20), s["servo"], "rider")
+piece(kit.rod((0.05, 0, 0.42), (0.052, 0, 0.428), 0.028, segments=16), s["rubber"], "rider")
 for sy in (1, -1):
-    piece(kit.rod((0.04, sy * 0.05, 0.405), (0.04, sy * 0.09, 0.4), 0.024, segments=8), s["servo"], "rider")
+    piece(kit.rod((0.04, sy * 0.05, 0.405), (0.04, sy * 0.09, 0.4), 0.024, segments=16), s["servo"], "rider")
     box((0.08, 0.05, 0.065), (0.04, sy * 0.11, 0.385), s["paint"], "rider", rot("X", -14 * sy), painted=True,
-        bevel=0.008, segments=2)
+        bevel=0.008, segments=4)
     box((0.084, 0.016, 0.012), (0.04, sy * 0.12, 0.352), s["iron"], "rider", rot("X", -20 * sy), bevel=0.003)
     # Arms out to the grips.
     shoulder = Vector((0.04, sy * 0.08, 0.4))
     elbow = Vector((0.11, sy * 0.13, 0.4))
     hand = Vector((CROWN.x + 0.02, sy * 0.115, CROWN.z + 0.065))
-    piece(kit.rod(shoulder, elbow, 0.017, segments=6, radius_end=0.014), s["servo"], "rider")
+    piece(kit.rod(shoulder, elbow, 0.017, segments=12, radius_end=0.014), s["servo"], "rider")
     box((0.034, 0.036, 0.038), shoulder.lerp(elbow, 0.42), s["plate"], "rider", bevel=0.005)
-    piece(kit.rod(elbow + Vector((0, -0.012 * sy, 0)), elbow + Vector((0, 0.012 * sy, 0)), 0.016, segments=8),
+    piece(kit.rod(elbow + Vector((0, -0.012 * sy, 0)), elbow + Vector((0, 0.012 * sy, 0)), 0.016, segments=16),
           s["servo"], "rider")
-    piece(kit.rod(elbow, hand, 0.013, segments=6, radius_end=0.011), s["servo"], "rider")
+    piece(kit.rod(elbow, hand, 0.013, segments=12, radius_end=0.011), s["servo"], "rider")
     box((0.046, 0.032, 0.032), elbow.lerp(hand, 0.45), s["plate"], "rider", bevel=0.004)
     box((0.024, 0.022, 0.024), hand, s["iron"], "rider", bevel=0.004)
 
 # The hood: a sealed welder's helmet, lens burning ember, one aerial.
-box((0.06, 0.062, 0.056), (0.05, 0, 0.47), s["plate"], "head", bevel=0.014, segments=2)
-piece(kit.ellipsoid((0.031, 0.032, 0.02), (0.048, 0, 0.494), segments=8, rings=4), s["iron"], "head")
+box((0.06, 0.062, 0.056), (0.05, 0, 0.47), s["plate"], "head", bevel=0.014, segments=4)
+piece(kit.ellipsoid((0.031, 0.032, 0.02), (0.048, 0, 0.494), segments=16, rings=8), s["iron"], "head")
 box((0.016, 0.056, 0.048), (0.085, 0, 0.468), s["paint"], "head", rot("Y", -10), painted=True, bevel=0.005)
 box((0.01, 0.052, 0.012), (0.092, 0, 0.48), s["iron"], "head", rot("Y", -16))
 box((0.006, 0.044, 0.011), (0.094, 0, 0.472), lamp, "head")
-piece(kit.rod((0.08, 0, 0.448), (0.1, 0, 0.446), 0.013, segments=8), s["servo"], "head")
+piece(kit.rod((0.08, 0, 0.448), (0.1, 0, 0.446), 0.013, segments=16), s["servo"], "head")
 for y in (0.033, -0.033):
     box((0.026, 0.008, 0.026), (0.05, y, 0.466), s["servo"], "head", bevel=0.004)
-piece(kit.rod((0.036, 0.03, 0.492), (0.03, 0.036, 0.53), 0.0035, segments=5), s["iron"], "head")
-piece(kit.rod((0.03, 0.036, 0.527), (0.029, 0.037, 0.534), 0.005, segments=5), lamp, "head")
+piece(kit.rod((0.036, 0.03, 0.492), (0.03, 0.036, 0.53), 0.0035, segments=10), s["iron"], "head")
+piece(kit.rod((0.03, 0.036, 0.527), (0.029, 0.037, 0.534), 0.005, segments=10), lamp, "head")
 
 kit.ground_check(parts)
 body = kit.join(parts, "body")
