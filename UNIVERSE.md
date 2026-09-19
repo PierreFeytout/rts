@@ -308,10 +308,92 @@ sealed head sunk between them, and a heavy plant at the feet.** It should read
 as something that weighs a great deal and was not built for this.
 
 They fight in **squads of three**, and a squad thins as it takes losses. On the
-field: bone-coloured helmets and aprons, the visor and shoulder plates in the
-owner's paint, the visor lens and the driver's heating coils glowing ember. The
-gun is long and held level, far out in front, because range is everything this
-unit has.
+field: the pauldrons, faceplate and chest plate in the owner's paint, the frame
+and the salvage never painted, the lens and the driver's heating coils glowing
+ember. The gun is long and held level, far out in front, because range is
+everything this unit has.
+
+**How it moves** matters as much as how it looks, and for the same reason. A
+loader frame does not jog. It **falls onto each foot and is caught** — the
+hips drop at every plant and rise through the stride, the boot lands flat
+rather than rolling heel to toe, and the frame rolls onto whichever leg is
+carrying it. To fire it **plants and braces**, squares its hips to the target
+and takes the recoil through the whole frame, and its helmet never leaves the
+target while it does. Standing still, it idles under load.
+
+#### The Outrider
+
+They were survey trikes: the runabouts a prospecting crew rides out ahead of
+the drop-hulls to flag the ground the Tender will lower onto. One fat wheel
+out in front on a long fork, two under a flat bed behind, and a survey mast
+with a beacon on it so the crew could find each other across a sector. The
+Ashen Directorate keeps the trikes and the doctrine; it only changed what is
+on the bed.
+
+An Outrider is that trike with the instruments taken off and a rivet driver
+bolted to the bars, ridden by a Conscript in a half-frame. Nothing on it is
+armoured but the rider, because nothing on it needs to be: it is not there to
+be hit, it is there to have seen.
+
+- **The trike is older than the war**, and looks it: a tubular spine, servo
+  rams on the fork and the swingarm, an engine block between the rear wheels
+  with its exhaust bent up past the rider, fat ribbed tyres for clinker.
+- **The bed carries what a scout needs**: a fuel drum with a hazard band, a
+  toolbox, and the survey mast -- kept, because the beacon is how the Contract
+  Office knows where its scouts are.
+- **The cowl over the front wheel is issued**, and painted; so are the bed's
+  side plates. The frame, the engine and the wheels never are.
+- **The rider is a Conscript**, hunched over the bars in the frame's upper
+  half: the same hood, lens and pauldrons, the same contract number.
+- **The weapon is the same rivet driver**, on a pintle over the bars,
+  firing straight ahead. It shoots what the trike is pointed at.
+
+The silhouette: **long and low, one big wheel leading, a rider crouched over
+it, and a thin mast with a lamp standing up behind** -- the tallest narrow
+thing on any light unit, so a scout reads as a scout at any zoom.
+
+**How it moves.** It never quite stands still: the engine shakes it at idle
+and the beacon blinks. Under way the wheels turn, the fork works over the
+ground and the rider leans into it. Firing, the driver kicks up on its
+pintle and the rider braces against the bars.
+
+#### The Breaker
+
+They were slag skimmers: the foundries' hover-sleds, a flat hull on two lift
+fans that could cross ground too hot and too broken for wheels, with a blade
+on the nose to skim the crust off a cooling pour and a bed behind to haul it.
+Every foundry on Furnace Nine had a few, and most of them were still where
+they had been parked when the Directorate came back.
+
+A Breaker is a skimmer with a breaching mortar where the skimming blade
+was -- a foundry charge-setter, the tool that set the explosive bolts for
+cracking a cold pour, re-bored to lob those charges at a wall -- and hull
+plate bolted round the crew well. It is named for what it does to buildings.
+
+- **The sled is the point.** Low, wide and flat, a skirt just off the ground,
+  and two big ducted fans let into the deck under grating. The fans are what
+  the camera sees most of, and they never stop.
+- **The hull is salvage over a working machine**: plate slabs bolted round
+  the crew well and along the flanks, mismatched and overlapping, with the
+  lift ducts, the exhausts and the fan housings left as they were.
+- **The blade stays.** Hazard chevrons on it, teeth on its lower edge: a
+  Breaker leads with it.
+- **The mortar is short and heavy**, in a squat housing at the front of the
+  deck, on recoil rams, with its charges racked on the flanks in canisters.
+  It fires straight ahead, and the whole hull rocks when it does.
+- **Paint** on the housing's top plates and the flank slabs; the fans, the
+  ducts, the blade and the skirt never.
+- **Ember** in the exhausts at the stern and in the charge canisters; a lamp
+  on the crew hatch.
+
+The silhouette: **the widest, flattest thing in a Directorate army**, two
+round grates in its back and a stubby gun on its nose. Beside it a Conscript
+squad looks like what it is.
+
+**How it moves.** It hovers: a slow bob at rest, the fans turning, the skirt
+swaying; under way the nose dips, the bob quickens and the fans blur.
+Firing, the mortar slams back into its rams and the hull pitches nose-up on
+its cushion before it settles.
 
 ### The Verdigris
 
