@@ -31,9 +31,8 @@ both races, new or reworked. The bar is:
 - **Checked in the game**, at playing zoom and close up, before it is called
   done. Previews rendered in Blender are not enough.
 
-Existing models below the bar — the Servitor, still in flat colours, and the
-built-in silhouettes — are waiting to be rebuilt. Don't use them as the
-reference.
+The built-in silhouettes are below the bar by design: they are the floor a
+type stands on before it has a model, never a reference.
 
 ## Models built by script
 

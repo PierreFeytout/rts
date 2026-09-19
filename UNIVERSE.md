@@ -273,6 +273,33 @@ goes somewhere -- and some of them go to city worlds.
 - **Construction is arrival**: the module comes down, unfolds, bolts itself
   in, and switches on.
 
+#### The Servitor
+
+"Labour, not a machine." A Servitor is a labourer wired into the harness of
+a hauling rig until there is little to tell apart. The rig is the same class
+of loader frame the Conscript fights in, but a hauler's: heavier in the legs,
+hunched under the hopper it carries on its back, its arms ending in the tools
+of the strip-back rather than in hands.
+
+- **The frame is the Conscript's**, older than the war: machined rams and
+  servo housings at every joint, salvage plate bolted over the front of it,
+  wide flat boots. Heavier, because it carries.
+- **The hopper is the load**, high on the back where a frame carries best:
+  recovered alloy heaped above its rim, hazard marking on the edge, the
+  Contract Office's paint on its side panels -- the largest painted faces on
+  the figure, which is how a player's own Servitors read from the air.
+- **The left arm is a cutter**, a disc saw in a painted guard, for opening
+  scrap seams; the right a grapple, for what comes out. Barely a weapon, and
+  that is the point.
+- **Wired in.** Cables run from the pack into the back of the hood and the
+  spine; there is no seat and no cage. The hood is a welder's hood, sealed,
+  one ember lens. The contract number is on the backplate, under the hopper.
+
+The silhouette: **a Conscript's frame with a box on its back and a disc on
+one arm, hunched forward.** It walks the Conscript's march under a load, and
+to cut it braces, brings the disc down into what is in front of it and lifts
+it clear.
+
 #### The Conscript
 
 They were foundry hands, welders, slag-sorters. When Furnace Nine was handed to

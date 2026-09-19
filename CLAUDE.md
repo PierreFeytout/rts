@@ -78,8 +78,8 @@ reworked models, both races.
 - One baked material plus one emissive; team mask as a vertex attribute.
 - Verified in the running game at playing zoom and close up before calling it done.
 
-The Servitor (`vanguard.drone`, flat colours) and the procedural silhouettes are
-below the bar and due to be rebuilt. They are not a reference.
+The procedural silhouettes are below the bar by design, the floor a type stands
+on before it has a model. They are not a reference.
 
 ## Buildings
 
