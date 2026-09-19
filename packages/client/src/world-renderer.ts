@@ -110,6 +110,14 @@ const BAR_HEIGHT = 0.13;
  */
 const MODEL_CAPACITY = 768;
 
+/**
+ * How much of its footprint a structure fills: authored in a 1 x 1 box, drawn
+ * this much of `footprint` wide, so neighbours never quite touch. Anything
+ * placed relative to a structure's geometry -- smoke off its stacks -- scales
+ * by the same number, or it drifts off the model.
+ */
+export const STRUCTURE_FIT = 0.94;
+
 export class WorldRenderer {
   private readonly scene: THREE.Scene;
   private readonly library: ModelLibrary;
@@ -298,7 +306,7 @@ export class WorldRenderer {
           const height = staged ? span : span * Math.max(0.15, progress);
           this.scratch.position.set(x, 0, z);
           this.scratch.rotation.set(0, 0, 0);
-          this.scratch.scale.set(span * 0.94, height * 0.94, span * 0.94);
+          this.scratch.scale.set(span * STRUCTURE_FIT, height * STRUCTURE_FIT, span * STRUCTURE_FIT);
           this.colour.setHex(teamColour(owner));
           // Unfinished structures are washed out, so a half-built factory is
           // never mistaken for a working one at a glance. Less so when the

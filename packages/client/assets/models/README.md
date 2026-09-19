@@ -282,6 +282,19 @@ squad has to fit the unit budget's width.
 `scripts/models/calibration_rig.py` is the smallest complete example, and
 `src/blender-rig.test.ts` checks what it exports.
 
+### Smoke
+
+A structure says where it smokes with a custom property **`rts_smoke`** on
+its armature, three numbers per stack in Blender axes and in the unit box:
+
+    [forward, left, up,  forward, left, up, ...]
+
+the mouth of each stack after the rig is shrunk to `1 / footprint`. While the
+building stands finished and in view, the game draws soft puffs rising from
+each point, a few a second per stack and twice as many while it has work
+queued (`packages/client/src/chimney-smoke.ts`). Presentation only: nothing
+in the simulation knows. `scripts/models/foundry.py` is the example.
+
 ## Structures
 
 `scripts/models/bastion.py` is the reference for every building: read it before

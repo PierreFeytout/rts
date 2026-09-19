@@ -10,7 +10,16 @@ import {
   type ModelPart,
 } from "./model-parts.js";
 import { MODEL_COUNT, buildModels, isStructureRole, modelFor, roleName } from "./models.js";
-import { SINGLE, isSkinned, toSkinnedParts, type AnimationBake, type SquadSlot } from "./skinned-parts.js";
+import {
+  NO_SMOKE,
+  SINGLE,
+  isSkinned,
+  readSmoke,
+  toSkinnedParts,
+  type AnimationBake,
+  type SmokePoint,
+  type SquadSlot,
+} from "./skinned-parts.js";
 
 /**
  * Every model the game can draw, authored or procedural, loaded once.
@@ -50,6 +59,8 @@ export interface Model {
   readonly animation?: AnimationBake;
   /** Where its figures stand. One figure at the centre unless the file says so. */
   readonly squad: readonly SquadSlot[];
+  /** Where its stacks smoke. Nowhere unless the file says so. */
+  readonly smoke: readonly SmokePoint[];
 }
 
 export interface ModelLibrary {
@@ -86,6 +97,7 @@ async function build(contentIdOf: (typeId: number) => string): Promise<ModelLibr
       structure: isStructureRole(role),
       authored: false,
       squad: SINGLE,
+      smoke: NO_SMOKE,
     });
   }
 
@@ -122,6 +134,7 @@ async function build(contentIdOf: (typeId: number) => string): Promise<ModelLibr
             authored: true,
             animation: skinned.bake,
             squad: skinned.squad,
+            smoke: readSmoke(gltf.scene, warn),
           });
           console.info(
             `[rts] model ${key}: ${skinned.bake.bones} bones, clips ${[...skinned.bake.clips.keys()].join(", ")}` +
@@ -135,7 +148,14 @@ async function build(contentIdOf: (typeId: number) => string): Promise<ModelLibr
           console.warn(`[rts] model ${key}: no meshes; using the built-in silhouette`);
           return;
         }
-        models.set(key, { key, parts, structure: false, authored: true, squad: SINGLE });
+        models.set(key, {
+          key,
+          parts,
+          structure: false,
+          authored: true,
+          squad: SINGLE,
+          smoke: readSmoke(gltf.scene, warn),
+        });
       } catch (error) {
         // A broken file costs its own model, not the game. The silhouette it
         // would have replaced is still there.

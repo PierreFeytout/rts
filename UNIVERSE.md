@@ -470,7 +470,8 @@ their colour while the building is selected.
   two chimneys at one end. It has to read as industry, never as command.
 - **Detail:** a wide vehicle door big enough for a Breaker (+X); the crucible,
   its pouring lip and glowing mould line (-Y); plate stock stacked outside;
-  the crane's trolley and hook over the roof.
+  the crane's trolley and hook over the roof; smoke off both stacks, all
+  match long, and thicker while it works.
 - **Paint:** the crane, the door frame, the hall's roof plates.
 - **Clips:** `build` -- the hall lands folded flat, its walls hinge up, the
   roof closes over, the crane unfolds and the chimneys run up. `idle` -- the

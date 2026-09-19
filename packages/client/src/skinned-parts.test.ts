@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import { TEAM_MASK } from "./model-parts.js";
 import {
   BAKE_FPS,
+  NO_SMOKE,
   SINGLE,
   bakeAnimations,
   frameAt,
+  readSmoke,
   readSquad,
   toSkinnedParts,
   type AnimationBake,
@@ -331,5 +333,30 @@ describe("readSquad", () => {
     const warnings: string[] = [];
     expect(readSquad(root, (m) => warnings.push(m))).toBe(SINGLE);
     expect(warnings.join()).toContain("three per figure");
+  });
+});
+
+describe("readSmoke", () => {
+  it("smokes nowhere unless the file says otherwise", () => {
+    expect(readSmoke(new THREE.Group())).toBe(NO_SMOKE);
+  });
+
+  it("converts Blender's axes: its +Z is up, its +Y is the left, which is -Z here", () => {
+    const root = new THREE.Group();
+    const stack = new THREE.Group();
+    stack.userData.rts_smoke = [-0.39, 0.2, 0.94, -0.3, 0.23, 0.83];
+    root.add(stack);
+    expect(readSmoke(root)).toEqual([
+      { x: -0.39, y: 0.94, z: -0.2 },
+      { x: -0.3, y: 0.83, z: -0.23 },
+    ]);
+  });
+
+  it("draws no smoke, with a warning, on a malformed list", () => {
+    const root = new THREE.Group();
+    root.userData.rts_smoke = [0.1, 0.2, "up"];
+    const warnings: string[] = [];
+    expect(readSmoke(root, (m) => warnings.push(m))).toBe(NO_SMOKE);
+    expect(warnings.join()).toContain("three per stack");
   });
 });

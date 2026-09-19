@@ -322,3 +322,40 @@ export function readSquad(root: THREE.Object3D, warn: (message: string) => void 
   }
   return slots;
 }
+
+/** Where a model smokes, in the unit box and in three.js axes. */
+export interface SmokePoint {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+/** What every model has unless its file says otherwise. */
+export const NO_SMOKE: readonly SmokePoint[] = [];
+
+/**
+ * A structure's stacks, from the file.
+ *
+ * Authored like `rts_squad`: a custom property `rts_smoke` on any object, a
+ * flat list of three numbers per stack -- `(forward, left, up)` in Blender
+ * axes, in the unit box, the top of the stack. Blender's +Y is the left and
+ * its +Z is up, so a point lands at three.js `(x, z, -y)`. The game draws
+ * smoke from each point while the building stands (chimney-smoke.ts).
+ */
+export function readSmoke(root: THREE.Object3D, warn: (message: string) => void = () => {}): readonly SmokePoint[] {
+  let raw: unknown;
+  root.traverse((object) => {
+    if (raw === undefined && object.userData.rts_smoke !== undefined) raw = object.userData.rts_smoke;
+  });
+  if (raw === undefined) return NO_SMOKE;
+
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length % 3 !== 0 || raw.some((v) => typeof v !== "number")) {
+    warn("rts_smoke must be a list of numbers, three per stack (forward, left, up); drawn without smoke");
+    return NO_SMOKE;
+  }
+  const points: SmokePoint[] = [];
+  for (let i = 0; i < raw.length; i += 3) {
+    points.push({ x: raw[i] as number, y: raw[i + 2] as number, z: -(raw[i + 1] as number) });
+  }
+  return points;
+}

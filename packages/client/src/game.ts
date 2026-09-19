@@ -11,6 +11,7 @@ import { sfx } from "./audio/sfx.js";
 import { CameraControls } from "./camera-controls.js";
 import { lightingFor } from "./biome-lighting.js";
 import { ControlGroups } from "./control-groups.js";
+import { ChimneySmoke } from "./chimney-smoke.js";
 import { Effects } from "./effects.js";
 import { FogRenderer } from "./fog-renderer.js";
 import { Hud } from "./hud.js";
@@ -211,6 +212,8 @@ export function startGame(options: GameOptions): RunningGame {
   const units = new WorldRenderer(scene, rig.camera, options.models);
   const effects = new Effects(scene);
   const rallies = new RallyMarkers(scene);
+  const resourceGlow = new ResourceGlow(scene);
+  const smoke = new ChimneySmoke(scene, rig.camera);
   const fog = new FogRenderer(scene, mapTiles, localPlayer);
   const sounds = new MatchSounds(localPlayer);
   // Every order the player gives is acknowledged, whichever part of the screen
@@ -448,6 +451,8 @@ export function startGame(options: GameOptions): RunningGame {
     fog.update(world);
     units.update(world, session.alpha, selection.selected, localPlayer);
     rallies.update(world, selection.selected, localPlayer, performance.now() / 1000);
+    resourceGlow.update(world, performance.now() / 1000, localPlayer);
+    smoke.update(world, deltaSeconds, localPlayer, options.models);
     // Heard from where the camera looks. The view height is how much of the map
     // is on screen vertically; the ground it covers is a little more than that.
     sfx.listen(rig.target.x, rig.target.z, rig.viewHeight * 0.75, SCREEN_RIGHT_X, SCREEN_RIGHT_Z);
@@ -573,6 +578,8 @@ export function startGame(options: GameOptions): RunningGame {
       groups.dispose();
       minimap.dispose();
       fog.dispose();
+      resourceGlow.dispose();
+      smoke.dispose();
       terrain.dispose();
       stopWatchingSettings();
       window.removeEventListener("keydown", onDebugKey);
