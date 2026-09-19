@@ -494,10 +494,17 @@ See The beasts, below.
 - **Growth imitating mechanism, badly.** Pipes swollen into veins, coils fused
   into ribs, rivets become polyps, gears grown shut. Nothing is a plant: no
   leaves, no wood, no petals of flesh.
-- **Three materials.** Powdery blue-green **verdigris crust** in bubbled,
-  layered shelves; dark, glossy **wet bronze** where the growth is alive; and
-  the pitted, red-brown **rotten metal** of the machine it is eating, showing
-  through wherever the crust has not yet closed.
+- **Three materials, and the flesh between them.** Powdery blue-green
+  **verdigris crust** in bubbled, layered shelves; dark, glossy **wet bronze**
+  where the growth is alive; and the pitted, red-brown **rotten metal** of the
+  machine it is eating, showing through wherever the crust has not yet
+  closed. Where the growth is soft -- a sac, a gullet, a heart, a gestation
+  pit -- taut, pale, veined **membrane**, wet and glossy, flushed where it has
+  worn thin over what works underneath.
+- **Alive, visibly.** A Verdigris structure is not a ruin with moss on it: it
+  breathes, swallows and swells. A heart beats in the Heartrot's split, bulges
+  travel up the Siphon's throats, the Canker's ribs flex over its pits. Every
+  structure has something moving at rest.
 - **Wet, and dripping.** Mineral stalactites under every overhang, slick runs
   down every wall. Ash does not settle on it -- it is absorbed.
 - **Light is rare and cold.** A faint verdigris phosphorescence in wet hollows
@@ -721,9 +728,11 @@ their colour while the building is selected.
 
 ### The Verdigris
 
-Its surfaces do not exist yet: verdigris crust, wet bronze and rotten metal
-have to be written in scripts/models/surfaces.py before the first of these
-is modelled.
+Its surfaces are `surfaces.verdigris_surfaces`: crust, bronze, rot,
+membrane and the bloom, sized with `scale=4.0` for a structure. Its
+geometry is `scripts/models/growth.py` -- swept tubes, lathes, terraces,
+blobs, crystals -- because nothing alive is a box; the Heartrot
+(`scripts/models/heartrot.py`) is the reference for the rest.
 
 #### Heartrot -- `concord.heartwood`
 
@@ -747,6 +756,8 @@ is modelled.
   the split tears open, the blooms open. `idle` -- the heart swells and eases,
   slowly, like breathing. `produce` -- faster, and the birth sac fills.
   `release` -- the sac splits and folds back.
+  **Modelled** -- `scripts/models/heartrot.py`, the reference for the race's
+  structures.
 
 #### Siphon -- `concord.siphon`
 
@@ -764,6 +775,8 @@ is modelled.
 - **Clips:** `build` -- tubes push up out of the ash and arch over, their ends
   bore down into the vent, crust closes over the joints. `idle` -- swallowing:
   bulges travel up each tube in turn. No `produce` or `release`.
+  **Modelled** -- `scripts/models/siphon.py`. The vent is consumed when the
+  Siphon is placed on it, so the model carries the vent's ember too.
 
 #### Canker -- `concord.grove`
 
@@ -785,6 +798,7 @@ is modelled.
   the spine splits, ribs lift out of it, crust climbs the sides, blooms open.
   `idle` -- the ribs flex a little. `produce` -- the pits churn and the ribs
   flex hard. `release` -- the birth opening parts and closes.
+  **Modelled** -- `scripts/models/canker.py`.
 
 #### Bloom -- `concord.bloom`
 
@@ -801,6 +815,7 @@ is modelled.
 - **Clips:** `build` -- crust spreads from a point, shelves stack up over the
   rising tank shell, the crown blooms. `idle` -- the blooms open and close,
   very slowly. No `produce` or `release`.
+  **Modelled** -- `scripts/models/bloom.py`.
 
 #### Barb -- `concord.barb`
 
@@ -819,6 +834,7 @@ is modelled.
   back under tension, the shards grow at the tip. `aim` and `aim_fire` -- the
   spine swings round its base to bear on the target, and flicks forward as it
   throws.
+  **Modelled** -- `scripts/models/barb.py`.
 
 ---
 

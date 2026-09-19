@@ -102,6 +102,12 @@ packages/client/assets/models/README.md before starting one.
 - "Verified in the game" includes the animations: construction at several
   stages, production, and a unit coming out, captured with `window.__rts` as
   the README describes.
+- **The Verdigris grows through.** Its structures are the Heartrot's kind
+  (`scripts/models/heartrot.py`): built from `scripts/models/growth.py` --
+  tubes, lathes, terraces, blobs, crystals, never boxes -- in
+  `verdigris_surfaces(scale=4.0)`, with the bloom's crystals as paint, the
+  cold `lamp` as light, something breathing in `idle`, and a `build` that is
+  emergence, never a drop. Alive first, machine second.
 - Design each building from UNIVERSE.md -- what it was, what it is now, what
   it does in the match -- and write that into the script's docstring before
   modelling, as bastion.py does.

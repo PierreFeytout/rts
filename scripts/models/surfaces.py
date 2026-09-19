@@ -679,7 +679,7 @@ VERDIGRIS_PALE = (0.2, 0.38, 0.29)
 VERDIGRIS_WET = (0.015, 0.045, 0.03)
 BRONZE = (0.075, 0.045, 0.02)
 BRONZE_SHEEN = (0.16, 0.12, 0.055)
-ROT = (0.15, 0.06, 0.03)
+ROT = (0.1, 0.045, 0.028)
 
 
 def crust(name="crust", colour=VERDIGRIS, **world):
@@ -734,10 +734,12 @@ def rot(name="rot", colour=ROT, **world):
     pits = g.band(g.noise(260, detail=3), 0.55, 0.75)
     flakes = g.cracks(60, 0.02)
     rust = g.band(g.noise(35, detail=6, distortion=0.4), 0.45, 0.7)
-    creep = g.band(g.noise(18, detail=5, distortion=0.6), 0.58, 0.72)
+    creep = g.band(g.noise(18, detail=5, distortion=0.6), 0.52, 0.68)
     crevice = g.math("SUBTRACT", 1.0, g.occlusion(0.006))
 
-    c = g.mix(rust, [v * 0.8 for v in colour], (0.22, 0.09, 0.04))
+    # Dark, so that a colonised shell reads as the crust's green with the
+    # metal showing through, never as a warm clay tower from the air.
+    c = g.mix(rust, [v * 0.8 for v in colour], (0.16, 0.07, 0.035))
     c = g.mix(g.math("MULTIPLY", pits, 0.8), c, (0.04, 0.02, 0.015))
     c = g.mix(g.math("MULTIPLY", flakes, 0.7), c, (0.03, 0.015, 0.01))
     c = g.mix(creep, c, [v * 0.85 for v in VERDIGRIS_PALE])
@@ -771,6 +773,30 @@ def hide(name="hide", colour=(0.07, 0.062, 0.042), **world):
     return g.finish(c, roughness, height, strength=0.5, distance=0.001)
 
 
+def membrane(name="membrane", colour=(0.15, 0.18, 0.12), **world):
+    """The living tissue of a structure: a sac, a gullet, a heart. Taut,
+    pale, wet and glossy, branched through with dark veins, flushed where it
+    has worn thin over what is working underneath."""
+    g = Graph(name, **world)
+    mottle = g.noise(25, detail=3)
+    thin = g.band(g.noise(14, detail=4, distortion=0.4), 0.55, 0.75)
+    veins = g.band(g.noise(40, detail=5, distortion=0.8), 0.57, 0.64)
+    fine = g.band(g.noise(120, detail=4, distortion=0.6), 0.6, 0.66)
+    sheen = g.edges(0.003)
+    crevice = g.math("SUBTRACT", 1.0, g.occlusion(0.005))
+
+    c = g.mix(mottle, [v * 0.75 for v in colour], [v * 1.2 for v in colour])
+    c = g.mix(g.math("MULTIPLY", thin, 0.7), c, (0.2, 0.11, 0.08))
+    c = g.mix(g.math("MULTIPLY", veins, 0.85), c, (0.05, 0.035, 0.02))
+    c = g.mix(g.math("MULTIPLY", fine, 0.5), c, (0.06, 0.05, 0.03))
+    c = g.mix(g.math("MULTIPLY", sheen, 0.5), c, [v * 1.6 for v in colour])
+    c = g.mix(g.math("MULTIPLY", crevice, 0.6), c, VERDIGRIS_WET)
+    roughness = g.mixf(veins, 0.22, 0.4)
+    roughness = g.mixf(crevice, roughness, 0.6)
+    height = g.math("ADD", g.math("MULTIPLY", veins, 0.7), g.math("MULTIPLY", fine, 0.3))
+    return g.finish(c, roughness, height, strength=0.45, distance=0.001)
+
+
 def bloom(name="bloom", **world):
     """The brood's colour: crystalline oxide bursting through the crust. The
     game turns 45% grey into the owner's colour, so the facets are greys
@@ -793,13 +819,15 @@ def bloom(name="bloom", **world):
 
 def verdigris_surfaces(scale):
     """Everything a Verdigris form is made of, sized for `scale`. No ash.
-    Structures are machines and use `rot`; the beasts use `hide`."""
+    Structures are colonised machines and use `rot` for what is being eaten
+    and `membrane` for what is alive in them; the beasts use `hide`."""
     world = {"scale": scale, "ash": 0.0}
     return {
         "crust": crust(**world),
         "bronze": bronze(**world),
         "rot": rot(**world),
         "hide": hide(**world),
+        "membrane": membrane(**world),
         "bloom": bloom(**world),
     }
 

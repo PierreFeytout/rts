@@ -50,7 +50,10 @@ holds what they share: the faction palettes, the team mask, bevels, and an
 export using exactly the settings below — so a scripted model cannot get them
 wrong. `scripts/models/beast.py` holds what the Verdigris's beasts share:
 jointed legs, tails, the crust along a spine, and the poses a leg takes in
-a stride.
+a stride. `scripts/models/growth.py` holds what its structures share: tubes
+swept along curves, lathes, the terraces a crust grows in, blobs, bubbles,
+drips and the bloom's crystals -- the organic geometry a colonised machine is
+grown from.
 
 **Textures are baked, not painted.** `scripts/models/surfaces.py` has the
 factions' surfaces as procedural node trees — canvas with a weave, leather,
@@ -162,7 +165,7 @@ Structures below.
 | | Triangles | Materials |
 |---|---|---|
 | Unit | 36,000 | 4 |
-| Structure | 14,000 | 4 |
+| Structure | 36,000 | 4 |
 
 Four hundred units can be on screen at once, and **triangles are the cheap
 axis**: every copy of a model is one instanced draw call per material however
@@ -174,10 +177,11 @@ Each **material**, on the other hand, is a separate draw call for every
 distinct model on screen, and that is what falls over at four hundred units:
 three materials is fine, a material per panel is not. The triangle numbers
 above are there to catch a model that has gone somewhere absurd, not to stop
-one being detailed. The unit figure is sized for the Verdigris's beasts, which
-are scaled and spiked all over and run to thirty thousand: an army never
-fields four hundred of those, and a few million triangles a frame is what the
-instanced renderer is for.
+one being detailed. Both figures are sized for the Verdigris: its beasts are
+scaled and spiked all over and run to thirty thousand, and its structures are
+grown from tubes, lathes and terraces -- nothing on them is a box -- and run
+about the same. An army never fields four hundred of those, and a few million
+triangles a frame is what the instanced renderer is for.
 
 ## Team colour
 
@@ -315,11 +319,18 @@ starting one. What it established, and what each new structure follows:
   whole base.
 - **Texture size follows footprint**, to keep the texel density the same:
   2048 for a footprint of 3 or 4, 1024 for 2.
-- **Every building carries the Directorate's motifs** (UNIVERSE.md, Surfaces):
+- **Every Directorate building carries its motifs** (UNIVERSE.md, Surfaces):
   the plate grid and its bolts come from the textures, on every face of
   every part, for nothing. Hazard edging the length of the two apron edges
   the camera sees, and a strip of `lamp` let into a lintel or an eave, are
   modelled -- a few boxes each -- and every shipped building has both.
+- **A Verdigris structure is grown, not assembled.** `scripts/models/heartrot.py`
+  is its reference: `surfaces.verdigris_surfaces(scale=4.0)`, geometry from
+  `scripts/models/growth.py` (nothing on it is a box), crust terraces and
+  veins to the footprint's edges, the bloom's crystals as its paint, the cold
+  `lamp` from `kit.verdigris_palette` as its light, and something breathing in
+  `idle`. Its `build` is emergence, never a drop: veins first, the machine
+  rising in their grip, crust swelling over it, the blooms last.
 - The game camera looks from **+X and -Y** (Blender axes). Doors, intakes,
   lights, paint and the finest detail go on those two faces; the far faces
   carry pipes and plates for the silhouette, cheaply.
@@ -338,9 +349,10 @@ close-up detail and are allowed to vanish at playing zoom.
 
 **Budget**
 
-8,000 triangles fills up fast with bevels. Pieces nobody can see -- under the
-hull, inside another piece, on the far side -- get no bevel, fewer segments, or
-are left out. Count with `kit.report` before baking.
+The budget fills up fast with bevels and, on a Verdigris structure, with
+tubes and lathes. Pieces nobody can see -- under the hull, inside another
+piece, on the far side -- get no bevel, fewer segments, or are left out.
+Count with `kit.report` before baking.
 
 **Clips**
 
