@@ -296,6 +296,42 @@ def report(col):
     }
 
 
+def ground_check(parts, floor=0.0, tolerance=0.0005):
+    """Name any piece whose geometry dips below the ground plane.
+
+    Worth a helper because this is the mistake this project makes most often:
+    a rotated toecap, a jittered slab, a skirt panel swung out a few degrees
+    too far, and the piece is now underground. It is invisible in every
+    orthographic view a model is checked in -- the piece is simply hidden by
+    the ground -- and in the game it reads as a figure sunk to the ankles or a
+    rock with a flat bottom edge, which nobody thinks to blame on the model.
+
+    Returns the offenders as `(name, lowest z)`, worst first, and prints them.
+
+    Evaluated through the depsgraph, like `report`, so it sees what the bevels
+    actually produced rather than the boxes they were applied to -- a chamfer
+    wide enough to matter moves the bottom edge of a part, and checking the
+    unmodified mesh is how a first pass at this missed the offender entirely.
+    """
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    low = []
+    for obj in parts:
+        if obj.type != "MESH":
+            continue
+        evaluated = obj.evaluated_get(depsgraph)
+        me = evaluated.to_mesh()
+        if len(me.vertices) > 0:
+            z = min((obj.matrix_world @ v.co).z for v in me.vertices)
+            if z < floor - tolerance:
+                low.append((obj.name, round(z, 4)))
+        evaluated.to_mesh_clear()
+    low.sort(key=lambda item: item[1])
+    for name, z in low:
+        print(f"  below ground: {name} at z={z}")
+    return low
+
+
 def export(col, content_id):
     """Write the .glb the game loads, with exactly the settings the README gives."""
     os.makedirs(MODELS_OUT, exist_ok=True)
@@ -709,6 +745,65 @@ def export_rigged(col, content_id, directory=MODELS_OUT):
         export_lights=False,
     )
     return path
+
+
+def rest_pose(rig):
+    """Put every bone back at rest.
+
+    Keying a clip leaves the rig standing in that clip's last pose, because
+    `keyframe_insert` records the pose it is given rather than a pose it
+    invents. Anything measured after that -- `report`'s bounds most of all --
+    is then measuring a posed figure and quietly disagreeing with the model.
+    """
+    rig.animation_data.action = None
+    for pb in rig.pose.bones:
+        pb.rotation_quaternion = (1, 0, 0, 0)
+        pb.location = (0, 0, 0)
+        pb.scale = (1, 1, 1)
+    bpy.context.view_layer.update()
+
+
+def pose_floor(rig, mesh, action, frames):
+    """The model's lowest point at every frame of a clip, as `(frame, z)`.
+
+    A walk is sold entirely by its feet, and feet are the one thing that
+    cannot be judged from a still: a planted boot that sinks two centimetres
+    into the ground on the frame it takes the weight looks like the figure is
+    wading, and a cycle whose lowest point drifts upward looks like it is
+    marching on air. Both are invisible in a preview render of frame 0 and
+    obvious in motion, which is far too late to be discovering them.
+
+    So the numbers come out of Blender rather than out of an eye: the lowest
+    vertex per frame, which should sit at the ground on the frames a foot is
+    planted and never below it on any frame.
+
+    Each entry also names the bone the lowest vertex is weighted to, which is
+    the whole difference between "something is underground" and knowing what.
+    Rigid parts carry exactly one group each (see `rigid_part`), and the
+    armature modifier does not renumber vertices, so the group on the original
+    mesh at that index is the answer.
+    """
+    groups = mesh.vertex_groups
+
+    def bone_at(index):
+        vertex = mesh.data.vertices[index]
+        return groups[vertex.groups[0].group].name if vertex.groups else "?"
+
+    result = []
+    for frame in range(frames + 1):
+        set_pose(rig, action, frame)
+        bpy.context.view_layer.update()
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        evaluated = mesh.evaluated_get(depsgraph)
+        me = evaluated.to_mesh()
+        index, z = min(
+            (((i, (mesh.matrix_world @ v.co).z) for i, v in enumerate(me.vertices))),
+            key=lambda pair: pair[1],
+        )
+        evaluated.to_mesh_clear()
+        result.append((frame, round(z, 4), bone_at(index)))
+    rig.animation_data.action = None
+    return result
 
 
 def set_pose(rig, action, frame):
