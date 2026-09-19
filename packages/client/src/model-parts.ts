@@ -461,7 +461,7 @@ export function teamAttributes(capacity: number): {
  * to catch a model that has gone somewhere absurd -- a bevelled sphere per
  * rivet -- and not to stop a unit being detailed.
  */
-export const TRIANGLE_BUDGET: Record<ModelKind, number> = { unit: 6000, structure: 14000 };
+export const TRIANGLE_BUDGET: Record<ModelKind, number> = { unit: 36000, structure: 14000 };
 
 /** Materials per model before a warning. Each one is a draw call per model on screen. */
 export const PART_BUDGET = 4;

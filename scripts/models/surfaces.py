@@ -131,6 +131,20 @@ class Graph:
         z = self.node("ShaderNodeSeparateXYZ", {"Vector": normal}).outputs["Z"]
         return self.band(z, start, end)
 
+    def cell_tone(self, scale):
+        """A random value per cell of a Voronoi pattern, constant across the
+        cell: the facets of a crystal, the plates of a crust."""
+        colour = self.node("ShaderNodeTexVoronoi", {"Vector": self.coords(), "Scale": scale / self.scale},
+                           feature="F1").outputs["Color"]
+        return self.node("ShaderNodeSeparateColor", {"Color": colour}, mode="RGB").outputs["Red"]
+
+    def shelves(self, scale, steps=4):
+        """Noise quantised into `steps` levels: terraces, the layered shelves
+        a mineral crust grows in. 0 to 1 in equal steps."""
+        n = self.noise(scale, detail=3, distortion=0.5)
+        level = self.math("FLOOR", self.math("MULTIPLY", n, float(steps + 1), clamp=False), clamp=False)
+        return self.math("DIVIDE", level, float(steps))
+
     # -- plates ---------------------------------------------------------------
     #
     # A Directorate structure is plate: sheets cut off something larger and
@@ -644,6 +658,149 @@ def structure_surfaces(scale, ash=0.6):
         "grate": grate(**world),
         "hazard": hazard(**world),
         "slag": slag(**world),
+    }
+
+
+# ---------------------------------------------------------------------------
+# The Verdigris's surfaces. UNIVERSE.md gives it three materials and a bloom:
+# powdery blue-green crust in bubbled, layered shelves; dark glossy wet bronze
+# where the growth is alive; the pitted red-brown rotten metal of the machine
+# it is eating, showing through wherever the crust has not closed; and the
+# crystalline oxide blooms that carry the brood's colour, where the
+# Directorate would carry paint. Wet everywhere -- slick runs down every face
+# -- and no ash: it is absorbed.
+# ---------------------------------------------------------------------------
+
+# UNIVERSE.md's `verdigris`, #4a7a5e, in linear light: the crust's body.
+VERDIGRIS = (0.06, 0.17, 0.11)
+# The powder on the lip of every shelf.
+VERDIGRIS_PALE = (0.2, 0.38, 0.29)
+# Wet in the hollows: the same green, near black.
+VERDIGRIS_WET = (0.015, 0.045, 0.03)
+BRONZE = (0.075, 0.045, 0.02)
+BRONZE_SHEEN = (0.16, 0.12, 0.055)
+ROT = (0.15, 0.06, 0.03)
+
+
+def crust(name="crust", colour=VERDIGRIS, **world):
+    """Verdigris crust: powdery and matte, grown in shelves that step down a
+    surface the way a mineral spring's do, bubbled between, pale on the lip of
+    every shelf and dark and wet in the hollows."""
+    g = Graph(name, **world)
+    shelves = g.shelves(30)
+    bubbles = g.band(g.noise(220, detail=2), 0.5, 0.8)
+    powder = g.band(g.noise(90, detail=4), 0.4, 0.7)
+    lips = g.edges(0.004)
+    hollows = g.math("SUBTRACT", 1.0, g.occlusion(0.006))
+    runs = g.band(g.noise(40, vector=g.stretched(6, 6, 1)), 0.58, 0.82)
+
+    c = g.mix(shelves, [v * 0.6 for v in colour], [v * 1.1 for v in colour])
+    c = g.mix(g.math("MULTIPLY", bubbles, 0.5), c, VERDIGRIS_PALE)
+    c = g.mix(g.math("MULTIPLY", powder, 0.5), c, VERDIGRIS_PALE)
+    c = g.mix(g.math("MULTIPLY", lips, 0.8), c, [v * 1.25 for v in VERDIGRIS_PALE])
+    c = g.mix(g.math("MULTIPLY", runs, 0.4), c, VERDIGRIS_WET)
+    c = g.mix(g.math("MULTIPLY", hollows, 0.7), c, VERDIGRIS_WET)
+    roughness = g.mixf(hollows, 0.95, 0.35)
+    roughness = g.mixf(runs, roughness, 0.3)
+    height = g.math("ADD", g.math("MULTIPLY", shelves, 0.7), g.math("MULTIPLY", bubbles, 0.3))
+    return g.finish(c, roughness, height, strength=0.6, distance=0.0015)
+
+
+def bronze(name="bronze", colour=BRONZE, **world):
+    """Wet bronze: the growth where it is alive. Dark, glossy, veined in the
+    crust's green, running wet as if it had just come up out of the sea."""
+    g = Graph(name, **world)
+    veins = g.band(g.noise(50, detail=5, distortion=0.6, vector=g.stretched(1, 1, 3)), 0.56, 0.66)
+    sheen = g.edges(0.003)
+    runs = g.band(g.noise(60, vector=g.stretched(8, 8, 1)), 0.55, 0.85)
+    grain = g.noise(300, detail=2)
+    crevice = g.math("SUBTRACT", 1.0, g.occlusion(0.005))
+
+    c = g.mix(g.math("MULTIPLY", grain, 0.3), colour, [v * 0.7 for v in colour])
+    c = g.mix(veins, c, (0.1, 0.2, 0.12))
+    c = g.mix(g.math("MULTIPLY", sheen, 0.7), c, BRONZE_SHEEN)
+    c = g.mix(g.math("MULTIPLY", runs, 0.4), c, [v * 0.5 for v in colour])
+    c = g.mix(g.math("MULTIPLY", crevice, 0.6), c, (0.012, 0.01, 0.006))
+    roughness = g.mixf(sheen, 0.3, 0.15)
+    roughness = g.mixf(runs, roughness, 0.12)
+    height = g.math("ADD", g.math("MULTIPLY", veins, 0.6), g.math("MULTIPLY", grain, 0.2))
+    return g.finish(c, roughness, height, strength=0.4, distance=0.001, metallic=0.5)
+
+
+def rot(name="rot", colour=ROT, **world):
+    """Rotten metal: the machine it is eating. Pitted, flaking, red-brown, and
+    the crust creeping over it in patches wherever it has had the time."""
+    g = Graph(name, **world)
+    pits = g.band(g.noise(260, detail=3), 0.55, 0.75)
+    flakes = g.cracks(60, 0.02)
+    rust = g.band(g.noise(35, detail=6, distortion=0.4), 0.45, 0.7)
+    creep = g.band(g.noise(18, detail=5, distortion=0.6), 0.58, 0.72)
+    crevice = g.math("SUBTRACT", 1.0, g.occlusion(0.006))
+
+    c = g.mix(rust, [v * 0.8 for v in colour], (0.22, 0.09, 0.04))
+    c = g.mix(g.math("MULTIPLY", pits, 0.8), c, (0.04, 0.02, 0.015))
+    c = g.mix(g.math("MULTIPLY", flakes, 0.7), c, (0.03, 0.015, 0.01))
+    c = g.mix(creep, c, [v * 0.85 for v in VERDIGRIS_PALE])
+    c = g.mix(g.math("MULTIPLY", crevice, 0.6), c, (0.02, 0.012, 0.008))
+    roughness = g.mixf(creep, 0.9, 0.95)
+    height = g.math("SUBTRACT", g.math("ADD", 0.5, g.math("MULTIPLY", creep, 0.5)),
+                    g.math("MULTIPLY", g.math("MAXIMUM", pits, flakes), 0.5))
+    return g.finish(c, roughness, height, strength=0.5, distance=0.0012)
+
+
+def hide(name="hide", colour=(0.07, 0.062, 0.042), **world):
+    """A beast's own hide: scaled, cold-blooded, and sick with what is in its
+    blood -- the scales lifting and blistering raw wherever the crust is
+    coming through, and the crust already closed over it in patches."""
+    g = Graph(name, **world)
+    scales = g.cell_tone(160)
+    seams = g.cracks(160, 0.018)
+    blisters = g.band(g.noise(120, detail=3), 0.6, 0.8)
+    creep = g.band(g.noise(18, detail=5, distortion=0.6), 0.6, 0.74)
+    crevice = g.math("SUBTRACT", 1.0, g.occlusion(0.005))
+
+    c = g.mix(scales, [v * 0.72 for v in colour], [v * 1.3 for v in colour])
+    c = g.mix(seams, c, (0.018, 0.016, 0.012))
+    c = g.mix(g.math("MULTIPLY", blisters, 0.7), c, (0.17, 0.075, 0.05))
+    c = g.mix(creep, c, [v * 0.85 for v in VERDIGRIS_PALE])
+    c = g.mix(g.math("MULTIPLY", crevice, 0.6), c, (0.015, 0.012, 0.01))
+    roughness = g.mixf(blisters, 0.8, 0.45)
+    roughness = g.mixf(creep, roughness, 0.95)
+    height = g.math("SUBTRACT", g.math("ADD", g.math("MULTIPLY", scales, 0.4), g.math("MULTIPLY", blisters, 0.5)),
+                    seams)
+    return g.finish(c, roughness, height, strength=0.5, distance=0.001)
+
+
+def bloom(name="bloom", **world):
+    """The brood's colour: crystalline oxide bursting through the crust. The
+    game turns 45% grey into the owner's colour, so the facets are greys
+    either side of it -- one tone per facet -- with the seams between them
+    dark, and a sheen on every edge."""
+    g = Graph(name, **world)
+    tone = g.cell_tone(120)
+    seams = g.cracks(120, 0.015)
+    sheen = g.edges(0.003)
+    grime = g.math("SUBTRACT", 1.0, g.occlusion(0.005))
+
+    c = g.mix(tone, (0.3, 0.3, 0.3), (0.6, 0.6, 0.6))
+    c = g.mix(seams, c, (0.08, 0.08, 0.08))
+    c = g.mix(g.math("MULTIPLY", sheen, 0.5), c, (0.72, 0.72, 0.72))
+    c = g.mix(g.math("MULTIPLY", grime, 0.5), c, (0.12, 0.12, 0.12))
+    roughness = g.mixf(seams, 0.22, 0.7)
+    height = g.math("SUBTRACT", 1.0, seams)
+    return g.finish(c, roughness, height, strength=0.5, distance=0.001)
+
+
+def verdigris_surfaces(scale):
+    """Everything a Verdigris form is made of, sized for `scale`. No ash.
+    Structures are machines and use `rot`; the beasts use `hide`."""
+    world = {"scale": scale, "ash": 0.0}
+    return {
+        "crust": crust(**world),
+        "bronze": bronze(**world),
+        "rot": rot(**world),
+        "hide": hide(**world),
+        "bloom": bloom(**world),
     }
 
 

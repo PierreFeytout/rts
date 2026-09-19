@@ -216,10 +216,10 @@ describe("checkContract", () => {
 
   it("catches a model over its triangle budget", () => {
     const heavy = standing(0.5, 0.5, 0.5);
-    const dense = new THREE.SphereGeometry(0.3, 64, 64);
+    const dense = new THREE.SphereGeometry(0.3, 160, 160);
     dense.translate(0, 0.3, 0);
     const issues = checkContract(partsFrom(dense), "unit");
-    expect(TRIANGLE_BUDGET.unit).toBeLessThan(64 * 64 * 2);
+    expect(TRIANGLE_BUDGET.unit).toBeLessThan(160 * 160 * 2);
     expect(issues.join()).toContain("budget");
     heavy.dispose();
   });

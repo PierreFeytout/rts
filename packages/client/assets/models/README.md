@@ -48,7 +48,9 @@ Each builds its model from nothing, exports the `.glb` here, saves a `.blend` to
 `art/previews/`, or wherever `RTS_PREVIEW_DIR` points). `scripts/models/kit.py`
 holds what they share: the faction palettes, the team mask, bevels, and an
 export using exactly the settings below — so a scripted model cannot get them
-wrong.
+wrong. `scripts/models/beast.py` holds what the Verdigris's beasts share:
+jointed legs, tails, the crust along a spine, and the poses a leg takes in
+a stride.
 
 **Textures are baked, not painted.** `scripts/models/surfaces.py` has the
 factions' surfaces as procedural node trees — canvas with a weave, leather,
@@ -159,7 +161,7 @@ Structures below.
 
 | | Triangles | Materials |
 |---|---|---|
-| Unit | 6,000 | 4 |
+| Unit | 36,000 | 4 |
 | Structure | 14,000 | 4 |
 
 Four hundred units can be on screen at once, and **triangles are the cheap
@@ -172,7 +174,10 @@ Each **material**, on the other hand, is a separate draw call for every
 distinct model on screen, and that is what falls over at four hundred units:
 three materials is fine, a material per panel is not. The triangle numbers
 above are there to catch a model that has gone somewhere absurd, not to stop
-one being detailed.
+one being detailed. The unit figure is sized for the Verdigris's beasts, which
+are scaled and spiked all over and run to thirty thousand: an army never
+fields four hundred of those, and a few million triangles a frame is what the
+instanced renderer is for.
 
 ## Team colour
 

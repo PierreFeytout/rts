@@ -87,6 +87,19 @@ def material(name, colour, roughness=0.6, metallic=0.2, emission=None, strength=
     return mat
 
 
+def verdigris_palette():
+    """The Verdigris's one light. See UNIVERSE.md: a faint, cold phosphorescence
+    in wet hollows and in the throats of its openings -- never bright, never
+    warm. Named `lamp` like the Directorate's, which is the name the bake keeps
+    unbaked; well under its strength, or a glow would read as a signal."""
+    return {
+        "glow": material(
+            "lamp", (0.3, 0.75, 0.5), roughness=0.5, metallic=0.0,
+            emission=(0.35, 0.95, 0.6), strength=1.4,
+        ),
+    }
+
+
 def directorate_palette():
     """The Ashen Directorate's materials. See UNIVERSE.md.
 

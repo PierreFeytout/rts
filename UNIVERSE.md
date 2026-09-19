@@ -476,11 +476,14 @@ back to be dissolved. Plasma is warmth, and growth runs faster near a vent. The
 hive does not hate the Directorate. It has noticed that the Directorate is a
 great deal of metal that shoots back, and it has learned the shape of guns.
 
-**Its units** are machinery it has digested and learned to walk: the
-**Creeper**, a crawling hauler dragging scrap into its own body; the
-**Flenser**, which closes to touching distance because corrosion spreads by
-contact; the **Blightcaster**, which spits a slurry of spores and acid over
-range; the **Behemoth**, a war machine's carcass it has fully grown into.
+**Its units** are not machines. The Sump's sea had animals of its own --
+cold-blooded, armoured, saurian -- and the hive grew through them as it
+grows through everything: corrupted, mutated, held. The **Creeper**, a
+scavenger lizard that hauls scrap for the brood; the **Flenser**, a raptor
+that closes to touching distance because corrosion spreads by contact; the
+**Blightcaster**, a squat spitter with a bladder of slurry under its jaw;
+the **Behemoth**, a horned siege beast bigger than anything the Sump fed.
+See The beasts, below.
 
 **What its structures look like** follows from that:
 
@@ -505,6 +508,94 @@ range; the **Behemoth**, a war machine's carcass it has fully grown into.
 - **Construction is emergence**: tendrils break the ash, the buried machine
   rises out of the ground in their grip, crust swells over it, and the blooms
   open last.
+
+#### The beasts
+
+The Sump's sea had its own life before the war rained metal into it:
+cold-blooded, armoured things that fed on the slurry and each other, the only
+animals the Ashworks ever had. The hive grew through them the way it grows
+through a machine. It is in their blood now, and it drives them: **corrupted,
+mutated, and held** -- a lizard that used to hunt for itself and now hunts
+for the brood, its hide lifting where the crust comes through, its eyes and
+its throat lit with the hive's cold light. They came down with the salvage
+like everything else.
+
+Nothing about a beast is an insect and nothing is a plant. They are
+**predators**, saurian, with jaws and claws and tails, the size of the job the
+hive has for them. Their materials are the hive's: **hide**, the animal's own
+skin, scaled and blistered and sick; **bronze** where the growth has replaced
+flesh -- horns, claws, teeth, the throat; **crust** grown in shelves over the
+back; and the **bloom** through the crust, in the brood's colour.
+
+#### The Creeper
+
+A scavenger lizard, low and long, that used to strip the Sump's wrecks of
+whatever it could dissolve. Now it hauls scrap for the brood: it swallows what
+it can and carries the rest in its jaws, and the gut where the metal dissolves
+glows cold through its belly.
+
+- **Body:** a monitor lizard's, sprawled on four bent legs, the belly a
+  hand off the ground; crust shelves in two rows along the spine, the bloom
+  between them; a long tail.
+- **Head:** wide and flat, a jaw that opens, eyes lit cold; a swollen gut
+  under the throat, bronze, split by a glowing seam.
+- **Clips:** `idle` -- it breathes and looks about, the tail stirring.
+  `walk` -- a lizard's gait, the body swinging side to side, the tail
+  lashing opposite. `fire` -- it lunges and bites.
+
+The silhouette: **a lizard, low and long, wider than it is high.**
+
+#### The Flenser
+
+A runner: a raptor on two legs, built to close. Long-legged, long-tailed, a
+narrow head all jaw, and a sickle claw on each foot the hive has grown into
+bronze. It closes because corrosion spreads by touch, and what it touches it
+opens.
+
+- **Body:** held level over two long legs, a stiff tail out behind for
+  balance, two small clawed arms at the chest; a ridge of crust along the
+  spine with the bloom on it.
+- **Head:** a raptor's, on a curved neck, jaws lined with bronze teeth, eyes
+  lit cold.
+- **Clips:** `idle` -- it shifts its weight and cocks its head. `walk` -- a
+  run, the body leaning into it. `fire` -- it lunges, jaws and claws.
+
+The silhouette: **lean, on two legs, the tail as long as the body.**
+
+#### The Blightcaster
+
+A spitter: a squat toad of a lizard with a throat sac the hive has grown
+into a bladder of bronze, full of the slurry it sprays. It spits a long way
+and folds to anything that reaches it.
+
+- **Body:** broad and low on four short legs, a dome of crust over the back
+  with the bloom on its crest, a short thick tail.
+- **Head:** wide, the jaw hinged low, the sac hanging under it and swelling
+  with every breath; eyes and gullet lit cold.
+- **Clips:** `idle` -- the sac swells and falls. `walk` -- a waddle. `fire`
+  -- the sac clenches, the head jerks forward and the gullet flares.
+
+The silhouette: **a toad with a bladder under its chin.**
+
+#### The Behemoth
+
+Bigger than anything the Sump ever fed: the hive's siege beast. A horned
+quadruped with a frill of crust and a head that is more jaw than skull, it
+carries the hive's own furnace in its gut -- it eats metal and heat -- and
+vomits a slug of it at whatever stands in the brood's way. Buildings crack.
+
+- **Body:** an elephant's mass on four columnar legs, a spined back under
+  crust shelves, the bloom on it large enough to read from the air; a thick
+  tail.
+- **Head:** a tyrant's jaws with bronze teeth, three bronze horns -- two
+  over the eyes and one on the nose -- and a frill of crust plates behind
+  the skull; eyes lit cold, and the gullet lit hot enough to show through
+  the throat.
+- **Clips:** `idle` -- it breathes, the whole body rising and settling.
+  `walk` -- a heavy walk, the body rolling onto each leg. `fire` -- the head
+  rears back, the jaws open, the gullet flares and the head comes down.
+
+The silhouette: **a horned bulk with a frill, the head leading.**
 
 ---
 
