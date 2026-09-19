@@ -3,8 +3,8 @@ import { deflateSync } from "node:zlib";
 /**
  * A minimal PNG encoder.
  *
- * Eight-bit RGB, no interlacing, no palette — which is the whole of what a
- * texture generator needs. Written out rather than pulled in because the job is
+ * Eight-bit RGB or RGBA, no interlacing, no palette — which is the whole of
+ * what a texture generator needs. Written out rather than pulled in because the job is
  * a zlib stream inside four length-prefixed chunks, `node:zlib` is built in,
  * and the alternative is a dependency in the build path of a game that
  * deliberately has almost none.
@@ -101,19 +101,22 @@ function filterRow(row, previous, bpp, out) {
 }
 
 /**
- * Encode an RGB image.
+ * Encode an RGB or RGBA image.
  *
- * `pixels` is `width * height * 3` bytes, row-major from the top left.
+ * `pixels` is `width * height * channels` bytes, row-major from the top left.
+ * Four channels is for data, not transparency: the terrain generator packs a
+ * height into a normal map's alpha and a glow mask into an ORM's, where a
+ * viewer showing them as see-through costs nothing and a fourth file would.
  */
-export function encodePng(pixels, width, height) {
-  const bpp = 3;
+export function encodePng(pixels, width, height, channels = 3) {
+  const bpp = channels;
   const stride = width * bpp;
 
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // colour type: truecolour
+  ihdr[9] = channels === 4 ? 6 : 2; // colour type: truecolour, with alpha or without
   ihdr[10] = 0; // deflate
   ihdr[11] = 0; // adaptive filtering
   ihdr[12] = 0; // no interlace

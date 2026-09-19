@@ -1,6 +1,6 @@
 import { TILE_BLOCKED, VIS_HIDDEN, VIS_VISIBLE, type CostGrid, type World } from "@rts/sim";
 import * as THREE from "three";
-import type { TerrainMaterials } from "./materials.js";
+import type { TerrainBiome } from "./materials.js";
 
 /**
  * Draws blocked tiles as spoil heaps.
@@ -72,7 +72,7 @@ function burial(tiles: Uint8Array, width: number, height: number, tx: number, ty
 
 export class TerrainRenderer {
   private readonly scene: THREE.Scene;
-  private readonly materials: TerrainMaterials;
+  private readonly materials: TerrainBiome;
   private mesh: THREE.InstancedMesh | null = null;
   private builtVersion = -1;
   /** Tile coordinate of each instance, so fog can be looked up per frame. */
@@ -80,7 +80,7 @@ export class TerrainRenderer {
   private fogTick = -1;
   private readonly colour = new THREE.Color();
 
-  constructor(scene: THREE.Scene, materials: TerrainMaterials) {
+  constructor(scene: THREE.Scene, materials: TerrainBiome) {
     this.scene = scene;
     this.materials = materials;
   }

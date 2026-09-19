@@ -1,0 +1,70 @@
+{
+  "ashworks": {
+    "surfaces": {
+      "ash": {
+        "repeat": 12,
+        "glow": 0,
+        "colour": "#281e16"
+      },
+      "cinder": {
+        "repeat": 12,
+        "glow": 0.25,
+        "colour": "#231810"
+      },
+      "ember": {
+        "repeat": 12,
+        "glow": 0.42,
+        "colour": "#6a4224"
+      },
+      "rockcrete": {
+        "repeat": 8,
+        "glow": 0,
+        "colour": "#322921"
+      },
+      "rubble": {
+        "repeat": 12,
+        "glow": 0,
+        "colour": "#38291e"
+      }
+    },
+    "cliff": {
+      "repeat": 1,
+      "glow": 0,
+      "colour": "#17110c"
+    }
+  },
+  "deepfreeze": {
+    "surfaces": {
+      "rime": {
+        "repeat": 12,
+        "glow": 0,
+        "colour": "#6c7a81"
+      },
+      "ice": {
+        "repeat": 12,
+        "glow": 0,
+        "colour": "#5a676f"
+      },
+      "meltrock": {
+        "repeat": 12,
+        "glow": 0.4,
+        "colour": "#33393e"
+      },
+      "rockcrete": {
+        "repeat": 8,
+        "glow": 0,
+        "colour": "#596063"
+      },
+      "scree": {
+        "repeat": 12,
+        "glow": 0,
+        "colour": "#5f696e"
+      }
+    },
+    "cliff": {
+      "repeat": 1,
+      "glow": 0,
+      "colour": "#1e1d1c"
+    }
+  }
+}

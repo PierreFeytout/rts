@@ -22,6 +22,11 @@ function hash2(ix, iy, seed) {
   return h / 4294967296;
 }
 
+/** The same hash, for a generator laying out its own grid of cells (slabs, panels). */
+export function cellRandom(ix, iy, seed) {
+  return hash2(ix, iy, seed);
+}
+
 /** Hermite interpolation, which is what keeps value noise from looking boxy. */
 function smooth(t) {
   return t * t * (3 - 2 * t);
@@ -142,6 +147,91 @@ export function worley(x, y, cells, seed) {
     }
   }
   return { f1, f2, id };
+}
+
+/**
+ * Scattered shapes: the largest value any nearby feature point's shape gives
+ * at this position.
+ *
+ * Worley asks "how far is the nearest point"; this asks "what is standing
+ * here". `shape(dx, dy, id)` is called once per feature point in the 3x3
+ * neighbourhood with the offset from that point in cell units and the point's
+ * own stable random, and returns how tall its shape is at that offset -- a
+ * dome for a pebble, a bevelled square for a broken slab, a crater's rim and
+ * bowl. The tallest wins, which is what a scatter of stones resting on each
+ * other looks like from above. Shapes must fit inside one cell's radius, or
+ * a point two cells away could contribute and would not be asked.
+ *
+ * Returns the winning value and the id of the point that won, so colour can
+ * follow shape: a stone gets one tone across its whole top, not noise.
+ */
+export function scatter(x, y, cells, seed, shape) {
+  const fx = x * cells;
+  const fy = y * cells;
+  const ix = Math.floor(fx);
+  const iy = Math.floor(fy);
+
+  let v = 0;
+  let id = 0;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const cx = ix + dx;
+      const cy = iy + dy;
+      const wx = ((cx % cells) + cells) % cells;
+      const wy = ((cy % cells) + cells) % cells;
+      const px = cx + hash2(wx, wy, seed);
+      const py = cy + hash2(wx, wy, seed + 7919);
+      const pid = hash2(wx, wy, seed + 104729);
+      const value = shape(fx - px, fy - py, pid);
+      if (value > v) {
+        v = value;
+        id = pid;
+      }
+    }
+  }
+  return { v, id };
+}
+
+/** As `scatter`, summed rather than maxed: for craters, which overlap by adding. */
+export function scatterSum(x, y, cells, seed, shape) {
+  const fx = x * cells;
+  const fy = y * cells;
+  const ix = Math.floor(fx);
+  const iy = Math.floor(fy);
+
+  let sum = 0;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const cx = ix + dx;
+      const cy = iy + dy;
+      const wx = ((cx % cells) + cells) % cells;
+      const wy = ((cy % cells) + cells) % cells;
+      const px = cx + hash2(wx, wy, seed);
+      const py = cy + hash2(wx, wy, seed + 7919);
+      sum += shape(fx - px, fy - py, hash2(wx, wy, seed + 104729));
+    }
+  }
+  return sum;
+}
+
+/**
+ * Domain warp: bend the coordinate space before sampling, so straight-ish
+ * cell edges and crack lines wander the way real ones do.
+ *
+ * The offset is itself tiling noise, so a warped coordinate one texture
+ * further along gets exactly the same offset -- the result still tiles. This
+ * is the single cheapest way to stop Worley plates reading as a honeycomb.
+ */
+export function warp(x, y, cells, amount, seed) {
+  const dx = (fbm(x, y, cells, 2, seed) - 0.5) * amount;
+  const dy = (fbm(x, y, cells, 2, seed + 77) - 0.5) * amount;
+  return [x + dx, y + dy];
+}
+
+/** A second and third stable random from one, for a shape that needs a size and an angle as well as a tone. */
+export function derive(id, k) {
+  const v = Math.sin(id * 127.1 + k * 311.7) * 43758.5453;
+  return v - Math.floor(v);
 }
 
 /**

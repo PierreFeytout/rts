@@ -1,5 +1,6 @@
-import { MAX_PLAYERS, hashNumber, type TypeTable } from "@rts/sim";
+import { MAX_PLAYERS, hashArray, hashNumber, type TypeTable } from "@rts/sim";
 import { parseMap, type RawMap } from "./map-schema.js";
+import { decodePaint } from "./paint.js";
 
 /**
  * Turning validated map files into something a match can be built from.
@@ -32,6 +33,11 @@ export interface MapInfo {
   readonly id: string;
   readonly name: string;
   readonly blurb: string;
+  readonly biome: string;
+  /** The biome's surfaces this map paints with; `paint` indexes into it. */
+  readonly layers: readonly string[];
+  /** One index into `layers` per tile, row-major. Decoded once, here. */
+  readonly paint: Uint8Array;
   /** Width and height in tiles; maps are always square. */
   readonly size: number;
   /** How many players this map seats. Always `starts.length`. */
@@ -140,6 +146,17 @@ function checkMap(
     }
   }
 
+  // -- paint ---------------------------------------------------------------
+
+  raw.layers.forEach((layer, i) => {
+    if (raw.layers.indexOf(layer) !== i) {
+      // Legal to encode, but never what anybody meant: the second copy can
+      // only ever be the first one painted under a different letter.
+      throw new Error(`content: ${where} lists surface '${layer}' twice in its layers`);
+    }
+  });
+  const paint = decodePaint(raw.paint, size * size, raw.layers.length, where);
+
   // -- terrain -------------------------------------------------------------
 
   raw.blocks.forEach(([x, y, w, h], i) => {
@@ -214,6 +231,9 @@ function checkMap(
     id: raw.id,
     name: raw.name,
     blurb: raw.blurb,
+    biome: raw.biome,
+    layers: [...raw.layers],
+    paint,
     size,
     maxPlayers: raw.starts.length,
     starts: raw.starts.map((s) => ({ x: s.x, y: s.y })),
@@ -261,6 +281,15 @@ export function hashMaps(hash: number, maps: readonly MapInfo[]): number {
   let h = hash;
   for (const map of maps) {
     for (const ch of map.id) h = hashNumber(h, ch.charCodeAt(0));
+    for (const ch of map.biome) h = hashNumber(h, ch.charCodeAt(0));
+    // The paint changes nothing the simulation does, but it is the map as
+    // much as the rocks are: a peer whose Cinder Reach has the crust
+    // somewhere else has a different Cinder Reach.
+    for (const layer of map.layers) {
+      for (const ch of layer) h = hashNumber(h, ch.charCodeAt(0));
+      h = hashNumber(h, 0);
+    }
+    h = hashArray(h, map.paint);
     h = hashNumber(h, map.size);
     for (const start of map.starts) {
       h = hashNumber(h, start.x);

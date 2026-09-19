@@ -12,6 +12,11 @@ packages/client/assets/models/README.md.
 with the sound effects tool there, from the library in art/sfx-library -- not
 generated, and not chosen for the user.
 
+A sound bundle is imported into that library by a script that keeps the
+shortlist as data (`scripts/sfx/import_soniss.py`): which packs earn their
+place, what each sound is called here, and why the rest was left out. Never
+copy a pack in by hand -- the reasoning is the part worth keeping.
+
 ## Interface
 
 Every screen outside a match is built from `screens/shell.ts` -- the game's
@@ -35,6 +40,31 @@ means adding a list of entries, never new markup or new colours.
 The soundtrack is the project's own recordings, never generated: files in
 packages/client/assets/music, assigned to menus, match moods and races by
 `music.json` there -- its README documents the format.
+
+## Terrain
+
+**A world is several surfaces, and a map paints with them** — never one
+texture stretched over everything. Each biome in `scripts/generate-terrain.mjs`
+has a ground plus four more that say what happened somewhere (crust, lava,
+poured slabs, rubble), and each map's `paint` layer says which tile is which.
+UNIVERSE.md's Surfaces section is what a surface has to answer before it is
+worth generating.
+
+- **Generated, never painted by hand**, from a height field that the colour,
+  the normals, the occlusion and the blend all derive from. The generator is
+  committed with its output, so a surface is re-tuned by changing a number.
+- **The colour carries its own shading.** At twenty screen pixels per tile a
+  normal map cannot sell relief on its own; every surface bakes cavity
+  darkening and edge lightening into the albedo, which is what the reference
+  art does and why it reads as detailed at playing zoom.
+- **Surfaces interlock, never cross-fade.** The blend follows the height
+  written into each normal map's alpha; see `splat-material.ts`.
+- **Two surfaces painted next to each other must differ in lightness**, or
+  the regions are invisible from playing height and the paint was wasted.
+- Adding a biome is a new entry in the generator and a map that asks for it.
+  Run `node scripts/generate-terrain.mjs <biome>` to rebuild just that one.
+- Verified in the running game at playing zoom before calling it done, both
+  as texture and as a map: the regions have to read from the air.
 
 ## 3D models: the quality bar
 

@@ -39,6 +39,12 @@ export interface Launch {
   session: MatchSession;
   localPlayer: number;
   isHost: boolean;
+  /**
+   * Which map this is, for its terrain biome (see materials.ts). Absent for a
+   * replay: nothing it stores lets this be recovered, so the ashen default
+   * plays back on any world -- a wrong ground texture, never a wrong match.
+   */
+  mapId?: string;
   /** Everything a guest needs to rebuild its connection after a drop. */
   reconnect?: {
     address: string;
@@ -151,6 +157,7 @@ function skirmish(): Promise<Launch | null> {
           session,
           localPlayer: 0,
           isHost: true,
+          mapId: config.mapId,
           ai: computerPlayers(config),
           release: () => {},
         });
@@ -229,6 +236,7 @@ function hostGame(): Promise<Launch | null> {
           session,
           localPlayer: 0,
           isHost: true,
+          mapId: lobby.config.mapId,
           ai: computerPlayers(lobby.config),
           // Hosting stops when the match does. Leaving the port open and the
           // relay running after everyone has gone back to the menu would keep
@@ -361,6 +369,10 @@ function waitInLobby(joined: Joined, token: string, name: string): Promise<Launc
   music.play("menu.lobby");
   return new Promise((resolve) => {
     const { address, transport, guest } = joined;
+    // The host can change the map after this screen opened; `joined.view` is
+    // this connection's first snapshot, not a live one, so the map the match
+    // actually starts on is whatever the most recent state said.
+    let mapId = joined.view.mapId;
 
     const setup: SetupScreen = new SetupScreen({
       mode: "guest",
@@ -377,7 +389,10 @@ function waitInLobby(joined: Joined, token: string, name: string): Promise<Launc
     setup.say("waiting for the host to start…");
 
     guest.replaceHandlers({
-      onState: (view) => setup.update(viewToConfig(view), view.yourSlot),
+      onState: (view) => {
+        mapId = view.mapId;
+        setup.update(viewToConfig(view), view.yourSlot);
+      },
       onStart: (mapTiles) => {
         setup.busy(true);
         setup.say("starting…");
@@ -392,6 +407,7 @@ function waitInLobby(joined: Joined, token: string, name: string): Promise<Launc
               session: connection.session,
               localPlayer: connection.playerId,
               isHost: false,
+              mapId,
               reconnect: { address, token, name, connection },
               ai: new Map(),
               release: () => transport.close(),

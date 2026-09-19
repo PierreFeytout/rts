@@ -9,15 +9,17 @@ import { MoodTracker, moodSlot } from "./audio/mood.js";
 import { music } from "./audio/music.js";
 import { sfx } from "./audio/sfx.js";
 import { CameraControls } from "./camera-controls.js";
+import { lightingFor } from "./biome-lighting.js";
 import { ControlGroups } from "./control-groups.js";
 import { Effects } from "./effects.js";
 import { FogRenderer } from "./fog-renderer.js";
 import { Hud } from "./hud.js";
 import { CAMERA_DISTANCE, IsoCamera } from "./iso-camera.js";
-import { groundGeometry, type TerrainMaterials } from "./materials.js";
+import { groundGeometry, type TerrainBiome } from "./materials.js";
 import type { ModelLibrary } from "./model-library.js";
 import { Minimap } from "./minimap.js";
 import { RallyMarkers } from "./rally-markers.js";
+import { ResourceGlow } from "./resource-glow.js";
 import { Selection } from "./selection.js";
 import { settings, type Settings } from "./settings.js";
 import { TerrainRenderer } from "./terrain-renderer.js";
@@ -63,8 +65,20 @@ export interface GameOptions {
    * all peers execute identical orders. See ai/driver.ts.
    */
   ai?: Map<number, AiDriver>;
-  /** Loaded once at startup; see materials.ts. */
-  terrain: TerrainMaterials;
+  /** Which world this is, for its sky and lights; see biome-lighting.ts. */
+  biome: string;
+  /** Loaded once per biome; see materials.ts. */
+  terrain: TerrainBiome;
+  /**
+   * Which of the biome's surfaces this map paints with, and where.
+   *
+   * Straight from the map file (`MapInfo.layers` and `MapInfo.paint`). The
+   * ground material is built from them here rather than in the loader,
+   * because the paint is this map's and the textures behind it are the whole
+   * biome's.
+   */
+  layers: readonly string[];
+  paint: Uint8Array;
   /** Every unit and building model, authored or procedural. Loaded once at startup. */
   models: ModelLibrary;
   /** Rendered in the HUD so a player can read their code back out mid-game. */
@@ -128,17 +142,26 @@ export function startGame(options: GameOptions): RunningGame {
   // else the player has chosen, by `applySettings` below.
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 
+  // What this world's sky and lights are; see biome-lighting.ts and
+  // UNIVERSE.md's "Other fronts". A ground texture alone does not make two
+  // worlds look different -- the key light is the brightest thing in the
+  // scene by a wide margin, and it has to change with the ground or it
+  // overwrites whatever the biome's own palette was arguing for.
+  const lighting = lightingFor(options.biome);
+
   const scene = new THREE.Scene();
   // The Ashworks: a low orange lid of a sky over ash that never settles. There
   // is no pure black anywhere in this palette -- airborne particulate scatters
-  // the furnace light into every shadow. See UNIVERSE.md.
-  scene.background = new THREE.Color(0x0a0806);
+  // the furnace light into every shadow. See UNIVERSE.md. (Another biome's own
+  // sky is described where its lighting is: biome-lighting.ts.)
+  scene.background = new THREE.Color(lighting.background);
   // Fog distance is measured from the camera, which sits CAMERA_DISTANCE back
   // to frame the orthographic view. Ranges must straddle that, not start near
   // zero, or the whole scene renders as flat fog colour.
-  // Heavy and warm. You should not be able to see the far side of a large map,
-  // and the reason should read as ash in the air rather than as a draw distance.
-  scene.fog = new THREE.Fog(0x1a1209, CAMERA_DISTANCE - 20, CAMERA_DISTANCE + 150);
+  // Heavy on every world. You should not be able to see the far side of a
+  // large map, and the reason should read as airborne particulate rather than
+  // as a draw distance -- ash on Furnace Nine, a biome's own otherwise.
+  scene.fog = new THREE.Fog(lighting.fog, CAMERA_DISTANCE - 20, CAMERA_DISTANCE + 150);
 
   const rig = new IsoCamera({
     viewHeight: 44,
@@ -147,27 +170,34 @@ export function startGame(options: GameOptions): RunningGame {
 
   const controls = new CameraControls(rig, canvas);
 
-  // Ambient is the ash-scattered sky: weak, and tinted toward the ground it is
+  // Ambient is the sky, scattered: weak, and tinted toward the ground it is
   // bouncing off rather than neutral grey.
-  scene.add(new THREE.AmbientLight(0x3a2c22, 1.1));
+  scene.add(new THREE.AmbientLight(lighting.ambient, lighting.ambientIntensity));
 
-  // The key is a furnace below the horizon, not a sun. Low angle, warm, and the
-  // brightest thing in the world by a wide margin.
-  const key = new THREE.DirectionalLight(0xe8a04a, 2.4);
+  // The key, low-angled and by a wide margin the brightest thing in the
+  // world. On Furnace Nine it is a furnace below the horizon, not a sun.
+  const key = new THREE.DirectionalLight(lighting.key, lighting.keyIntensity);
   key.position.set(-60, 34, -26);
   scene.add(key);
 
-  // One weak cold rim from overhead, and the only blue permitted anywhere. It
-  // exists to separate a silhouette from the ground it is standing on; without
-  // it every unit disappears into the floor, because both are the same warm
-  // dark brown.
-  const rim = new THREE.DirectionalLight(0x4a6a8a, 0.95);
+  // One rim from overhead, at the *other* temperature from the key -- see
+  // UNIVERSE.md's palette rules on why there is always exactly one. It exists
+  // to separate a silhouette from the ground it is standing on; without it
+  // every unit disappears into the floor, because both are lit the same.
+  const rim = new THREE.DirectionalLight(lighting.rim, lighting.rimIntensity);
   rim.position.set(40, 80, 55);
   scene.add(rim);
 
+  // This map's ground: the biome's surfaces, blended by its own paint. Owned
+  // by the match, unlike the textures behind it -- see `stop`.
+  const groundMaterial = options.terrain.ground({
+    layers: options.layers,
+    paint: options.paint,
+    mapTiles,
+  });
   const ground = new THREE.Mesh(
     groundGeometry(mapTiles, (tx, ty) => world.grid.inBounds(tx, ty) && world.grid.isBlocked(tx, ty)),
-    options.terrain.groundMaterial(mapTiles),
+    groundMaterial.material,
   );
   ground.position.set(mapTiles / 2, 0, mapTiles / 2);
   ground.receiveShadow = false;
@@ -193,7 +223,10 @@ export function startGame(options: GameOptions): RunningGame {
   const hud = new Hud(world, localPlayer, selection, issue, options.models);
   const groups = new ControlGroups(world, selection, rig, localPlayer);
   // Built after the HUD, because the console owns the bay it mounts into.
-  const minimap = new Minimap(world, rig, localPlayer, hud.minimapBay);
+  const minimap = new Minimap(world, rig, localPlayer, hud.minimapBay, {
+    paint: options.paint,
+    colours: options.layers.map((name) => options.terrain.colours[name] ?? "#241a12"),
+  });
 
   // Translucent footprint preview shown while placing a building.
   const ghost = new THREE.Mesh(
@@ -551,14 +584,14 @@ export function startGame(options: GameOptions): RunningGame {
       // the next one -- and on the third or fourth match that is visible as a
       // browser tab using a gigabyte.
       //
-      // The terrain materials are the exception, and the reason this needs a
-      // guard at all: they own the generated textures, they are loaded once for
-      // the life of the process, and disposing them here would leave the next
-      // match rendering its ground with a destroyed texture.
-      const shared = new Set<THREE.Material>([
-        options.terrain.slag,
-        options.terrain.groundMaterial(mapTiles),
-      ]);
+      // The biome's own materials are the exception, and the reason this
+      // needs a guard at all: they own the generated textures, they are
+      // loaded once for the life of the process, and disposing them here
+      // would leave the next match rendering its ground with a destroyed
+      // texture. The ground material is not among them -- it is this map's,
+      // built from this map's paint -- so it is disposed explicitly.
+      const shared = new Set<THREE.Material>([options.terrain.slag]);
+      groundMaterial.dispose();
       scene.traverse((object) => {
         const mesh = object as Partial<THREE.Mesh>;
         const material = mesh.material;

@@ -8,8 +8,10 @@ import {
 } from "@rts/sim";
 import type { IsoCamera } from "./iso-camera.js";
 import {
+  ALLOY_COLOUR as PALETTE_ALLOY,
   NEUTRAL_COLOUR as PALETTE_NEUTRAL,
   TEAM_COLOURS as PALETTE_TEAMS,
+  VENT_COLOUR as PALETTE_VENT,
   css,
 } from "./palette.js";
 
@@ -34,9 +36,27 @@ const REDRAW_MS = 66;
 
 const TEAM_COLOURS = PALETTE_TEAMS.map(css);
 const NEUTRAL_COLOUR = css(PALETTE_NEUTRAL);
-/** Open ashfield, and the spoil heaps standing on it. See UNIVERSE.md. */
+const ALLOY_COLOUR = css(PALETTE_ALLOY);
+const VENT_COLOUR = css(PALETTE_VENT);
+/**
+ * The ground, when nothing better is known.
+ *
+ * Every biome reports its own surface colours -- see `TerrainBiome.colours`,
+ * which the terrain generator measures from the textures it writes, so the
+ * minimap cannot drift out of step with the ground it is a picture of. This
+ * is what a replay gets, which has no map to ask.
+ */
 const GROUND_COLOUR = "#241a12";
+/** The spoil heaps standing on it. Darker than any surface, on every world. */
 const SPOIL_COLOUR = "#0f0c09";
+
+/** What one map paints its ground with, for the minimap's terrain layer. */
+export interface MinimapGround {
+  /** One layer index per tile, row-major. `MapInfo.paint`. */
+  readonly paint: Uint8Array;
+  /** The colour of each layer, in the order `paint` indexes them. */
+  readonly colours: readonly string[];
+}
 
 export class Minimap {
   private readonly canvas: HTMLCanvasElement;
@@ -60,14 +80,23 @@ export class Minimap {
   private readonly fogStep: number;
 
   private terrainVersion = -1;
+  /** This map's paint and its colours; absent for a replay. */
+  private readonly ground: MinimapGround | undefined;
   private lastDraw = 0;
   private dragging = false;
   private readonly disposers: Array<() => void> = [];
 
-  constructor(world: World, rig: IsoCamera, localPlayer: number, parent: HTMLElement) {
+  constructor(
+    world: World,
+    rig: IsoCamera,
+    localPlayer: number,
+    parent: HTMLElement,
+    ground?: MinimapGround,
+  ) {
     this.world = world;
     this.rig = rig;
     this.localPlayer = localPlayer;
+    this.ground = ground;
     this.scale = SIZE / world.mapTiles;
     this.fogStep = Math.max(1, Math.floor(world.mapTiles / SIZE));
 
@@ -172,7 +201,8 @@ export class Minimap {
       if (type.kind === KIND_RESOURCE) {
         // Ore is only worth marking once you know it is there.
         if (!vision.isExplored(this.localPlayer, e.posX[i] >> 16, e.posY[i] >> 16)) continue;
-        ctx.fillStyle = NEUTRAL_COLOUR;
+        // The same read as the 3D view: an Alloy Node's shine, a Vent's fire.
+        ctx.fillStyle = type.resourceAmount > 0 ? ALLOY_COLOUR : VENT_COLOUR;
       } else {
         ctx.fillStyle = owner < 0 ? NEUTRAL_COLOUR : TEAM_COLOURS[owner % TEAM_COLOURS.length];
       }
@@ -225,11 +255,39 @@ export class Minimap {
 
     const ctx = this.terrainCtx;
     const s = this.scale;
+    const grid = this.world.grid;
+
+    // The painted ground, at whatever resolution the canvas has: the map's
+    // own surfaces, in the average colour the generator measured for each.
+    // Sampled per canvas pixel rather than per tile, because on a 1024-tile
+    // map one pixel is five tiles and drawing all of them is thirty times
+    // the work for the same picture.
     ctx.fillStyle = GROUND_COLOUR;
     ctx.fillRect(0, 0, SIZE, SIZE);
+    const ground = this.ground;
+    if (ground) {
+      const step = this.world.mapTiles / SIZE;
+      for (let py = 0; py < SIZE; py++) {
+        const ty = Math.min(this.world.mapTiles - 1, Math.floor(py * step));
+        let runStart = 0;
+        let runLayer = -1;
+        // Runs along the row, so a stretch of one surface is one fill rather
+        // than two hundred.
+        for (let px = 0; px <= SIZE; px++) {
+          const tx = Math.min(this.world.mapTiles - 1, Math.floor(px * step));
+          const layer = px < SIZE ? ground.paint[ty * this.world.mapTiles + tx] : -1;
+          if (layer === runLayer) continue;
+          if (runLayer >= 0) {
+            ctx.fillStyle = ground.colours[runLayer] ?? GROUND_COLOUR;
+            ctx.fillRect(runStart, py, px - runStart, 1);
+          }
+          runStart = px;
+          runLayer = layer;
+        }
+      }
+    }
 
     ctx.fillStyle = SPOIL_COLOUR;
-    const grid = this.world.grid;
     for (let ty = 0; ty < grid.height; ty++) {
       for (let tx = 0; tx < grid.width; tx++) {
         // Only real terrain. Building footprints are drawn as entities, so

@@ -56,6 +56,10 @@ describe("map schema", () => {
   it("accepts a map at exactly the bound", () => {
     const big = draft();
     big.size = 1024;
+    // Paint covers exactly the tiles a map has, so resizing one means
+    // repainting it -- which is the point of the check, and is why the
+    // editor will always write both together.
+    big.paint = `${1024 * 1024}a`;
     expect(load(big)).not.toThrow();
   });
 });
@@ -178,11 +182,58 @@ describe("map coherence", () => {
     // started, which reads as a broken lobby rather than as missing content.
     expect(() => buildContent([vanguard], mapResources, [])).toThrow(/no maps defined/);
   });
+
+  it("refuses paint that does not cover the map", () => {
+    // The map would load and the tiles the paint ran out on would be drawn
+    // in whichever surface happens to be first, with nothing said.
+    const bad = draft();
+    bad.paint = "4000a";
+    expect(load(bad)).toThrow(/covers 4000 tiles, not 4096/);
+  });
+
+  it("refuses the same surface listed twice", () => {
+    // Legal to encode, and never what anybody meant: the second copy can
+    // only ever be the first one painted under a different letter.
+    const bad = draft();
+    bad.layers = ["fixture", "fixture"];
+    expect(load(bad)).toThrow(/lists surface 'fixture' twice/);
+  });
+
+  it("refuses more layers than the ground shader blends", () => {
+    const bad = draft();
+    bad.layers = ["a", "b", "c", "d", "e", "f"];
+    expect(load(bad)).toThrow(/invalid/);
+  });
 });
 
 describe("the shipped maps", () => {
-  it("ships the two the lobby offers", () => {
-    expect(defaultContent.maps.map((m) => m.id)).toEqual(["rift-basin", "sprawl"]);
+  it("ships the maps the lobby offers", () => {
+    expect(defaultContent.maps.map((m) => m.id)).toEqual(["rift-basin", "sprawl", "deepfreeze"]);
+  });
+
+  it("paints every tile of every map, with surfaces the map lists", () => {
+    // The loader proves this at import, but a map added later should fail in
+    // a test named for the problem rather than inside whichever suite
+    // happened to import the content set first.
+    for (const map of defaultContent.maps) {
+      expect(map.paint.length).toBe(map.size * map.size);
+      expect(map.layers.length).toBeGreaterThan(0);
+      // One assertion over the whole array rather than one per tile: the
+      // largest map is a million of them, and a million `expect` calls is
+      // slower than every other test in the workspace put together.
+      let highest = 0;
+      for (const layer of map.paint) if (layer > highest) highest = layer;
+      expect(highest).toBeLessThan(map.layers.length);
+    }
+  });
+
+  it("gives every map some ground that is not its default surface", () => {
+    // A map whose paint is one long run of `a` is a map nobody painted, and
+    // the whole point of the layer is that the ground changes across one.
+    for (const map of defaultContent.maps) {
+      const used = new Set(map.paint);
+      expect(used.size).toBeGreaterThan(1);
+    }
   });
 
   it("seats at least two players on every map", () => {
@@ -227,6 +278,18 @@ describe("the content hash", () => {
     // rather than desync on the first order.
     expect(buildContent([vanguard], mapResources, [moved]).hash).not.toBe(
       buildContent([vanguard], mapResources, [fixtureMap]).hash,
+    );
+  });
+
+  it("changes when a map's ground is painted differently", () => {
+    // Paint changes nothing the simulation does, so this is not about
+    // desync: it is that two people who picked the same map should be
+    // looking at the same place, and the handshake is where that is caught.
+    const plain = draft();
+    plain.layers = ["fixture", "other"];
+    const repainted = { ...plain, paint: "4095ab" };
+    expect(buildContent([vanguard], mapResources, [repainted]).hash).not.toBe(
+      buildContent([vanguard], mapResources, [plain]).hash,
     );
   });
 

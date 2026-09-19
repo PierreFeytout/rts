@@ -10,10 +10,14 @@
  * The same reasoning as packages/sim/src/fixture-types.ts.
  */
 export const fixtureMap = {
-  format: 1,
+  format: 2,
   id: "fixture",
   name: "Fixture",
   blurb: "The smallest thing the loader accepts.",
+  biome: "fixture",
+  layers: ["fixture"],
+  // 64 x 64 tiles, all of them the first (and only) surface.
+  paint: "4096a",
   size: 64,
   starts: [
     { x: 8, y: 8 },

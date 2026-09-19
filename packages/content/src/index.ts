@@ -1,4 +1,5 @@
 import { buildContent, type ContentSet } from "./intern.js";
+import deepfreeze from "./maps/deepfreeze.json" with { type: "json" };
 import riftBasin from "./maps/rift-basin.json" with { type: "json" };
 import sprawl from "./maps/sprawl.json" with { type: "json" };
 import { concord } from "./races/concord.js";
@@ -28,7 +29,7 @@ export { concord, mapResources, vanguard };
 export const defaultContent: ContentSet = buildContent(
   [vanguard, concord],
   mapResources,
-  [riftBasin, sprawl],
+  [riftBasin, sprawl, deepfreeze],
 );
 
 /**

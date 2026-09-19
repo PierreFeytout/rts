@@ -30,17 +30,16 @@ import { installStyles } from "./ui.js";
 enableDevChecks(import.meta.env.DEV);
 installStyles();
 
-// Decoded once, before the menu is even shown. Textures and models take long
-// enough to be a visible hitch, and the moment it would otherwise land is
-// exactly when the player has just pressed Start.
+// Decoded once, before the menu is even shown. Models take long enough to be
+// a visible hitch, and the moment it would otherwise land is exactly when the
+// player has just pressed Start. Terrain is not loaded here: which biome a
+// match needs is not known until a map is chosen, so it is loaded in
+// `runMatch` instead, once that answer exists.
 //
 // Models never fail as a whole: a file that will not parse costs that one
 // model, which falls back to its built-in silhouette. Audio does not block the
 // menu at all: a failure there should cost the sound, not the game.
-const [terrain, models] = await Promise.all([
-  loadTerrain(),
-  loadModels((typeId) => defaultContent.contentIdOf(typeId)),
-]);
+const models = await loadModels((typeId) => defaultContent.contentIdOf(typeId));
 void music.load().catch((error: unknown) => console.warn("[rts] no music:", error));
 void sfx.load().catch((error: unknown) => console.warn("[rts] no sound effects:", error));
 // Every button anywhere -- menus, the command card -- clicks.
@@ -57,16 +56,38 @@ for (;;) {
   await launch.release();
 }
 
+/**
+ * The biome a replay plays back in, since nothing it stores says.
+ *
+ * Furnace Nine's own, because it is the one every recording made before a
+ * second biome existed was actually made on, and it is the reasonable default
+ * for one that has moved on to a world this build cannot name.
+ */
+const DEFAULT_BIOME = "ashworks";
+
+/** The one surface a replay's ground is painted in. Furnace Nine's own ash. */
+const DEFAULT_LAYER = "ash";
+
 /** Run one match, and resolve when the player is finished with it. */
 async function runMatch(launch: Launch): Promise<void> {
+  // A replay cannot say which map it was recorded on, so it gets Furnace
+  // Nine's ground painted flat -- see DEFAULT_BIOME.
+  const map = launch.mapId ? defaultContent.map(launch.mapId) : null;
+  const biome = map ? map.biome : DEFAULT_BIOME;
+  const terrain = await loadTerrain(biome);
+  const mapTiles = launch.world.mapTiles;
+
   const game = startGame({
     world: launch.world,
     session: launch.session,
     localPlayer: launch.localPlayer,
     isHost: launch.isHost,
-    mapTiles: launch.world.mapTiles,
+    mapTiles,
     ai: launch.ai,
+    biome,
     terrain,
+    layers: map ? map.layers : [DEFAULT_LAYER],
+    paint: map ? map.paint : new Uint8Array(mapTiles * mapTiles),
     models,
   });
 

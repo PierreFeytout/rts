@@ -42,6 +42,46 @@ is straightforward. Standing near one is not.
 Neither is renewable and neither is enough. The Ashworks is not worth holding;
 it is worth stripping before somebody else does.
 
+#### Map resources
+
+Scenery, not equipment -- there before either side arrived and belonging to
+neither. Nothing here is painted a faction's colour, because no faction has
+touched it yet; the only colour is what the thing itself is.
+
+##### Alloy Node -- `map.alloy-node`
+
+*Footprint 2. Yields alloy.*
+
+- **Was:** whatever stood here nine hundred years ago. **Is:** a low scarp of
+  clinker that has slumped and cracked open, showing a cross-section of what
+  it buried: girders, gear wheels, plate, a burst pipe -- compacted machinery,
+  not ore.
+- **Silhouette:** an irregular mound, not a crystal cluster -- a patch of
+  ground that has come apart, low enough to see over.
+- **Detail:** the exposed face is the point: a jumble of half-buried structure
+  cut through at an angle, torn plate edges, a gear half swallowed by slag,
+  loose rubble at the foot of the scarp.
+- **Paint:** the exposed metal only -- girders, gears, plate, pipe -- so it
+  reads as the alloy against the dead slag around it.
+- **Modelled** -- `scripts/models/alloy_node.py`.
+
+##### Geothermal Vent -- `map.vent`
+
+*Footprint 2. A marker: nothing to mine, but an Extractor or a Siphon can be
+built on it.*
+
+- **Was:** and **is:** a fissure where the furnaces below reach the surface --
+  nothing built it and nothing has capped it yet.
+- **Silhouette:** broken crust tilted up around a dark opening, low and
+  irregular, easy to miss until the glow is seen.
+- **Detail:** cracked slag radiating from the hole, ember light leaking
+  through the cracks and pooling faintly at the rim. Whichever race caps it
+  inherits this glow -- the Vent Tap and the Siphon both carry it into their
+  own model, because the vent is consumed when either is built.
+- **Paint:** the crust immediately around the opening, so the heat reads as
+  part of the rock and not just the light sitting on top of it.
+- **Modelled** -- `scripts/models/vent.py`.
+
 ### The war, and the moon
 
 The Directorate did not keep Furnace Nine to itself. Another power disputed
@@ -58,6 +98,89 @@ on it too: ships, drop-hulls, the dead of both sides, and all their metal.
 
 In that sea, over the generations since, something evolved. It is the
 Verdigris, and it has come down.
+
+---
+
+## Other fronts
+
+Furnace Nine is not the only claim in dispute. The Directorate runs an
+administration the size of several star systems (see Who they are, below),
+and its war with the Verdigris follows both of them wherever they have a
+reason to be. Different maps can be different worlds -- not the same ash
+with a new coat of paint, but a sector with its own weather, its own
+geology, and its own reason for what is lying around on it. Two armies
+built for one climate should look like they are visiting the other.
+
+**The palette rule bends per world, not per whim.** Furnace Nine's "no
+blue, no green" (see Art direction) is what nine hundred years of furnace
+smoke does to a sky and a ground -- it is not a law of the setting itself.
+A world with its own colour needs its own reason for it, argued the same
+way Furnace Nine's was: what it was, what happened to it, and where the
+wear collects. Not picked for contrast against the last map's tan.
+
+The map resources stay the same everywhere -- Alloy recovered, Plasma
+tapped -- because what a world's ground is made of changes and what two
+armies need from it does not. Only the excuse for finding them changes
+from world to world.
+
+#### Cistern Four -- "the Deepfreeze"
+
+In the registry, a cryo-reserve: built to keep in cold storage what could
+not survive a furnace world's heat -- coolant stock for the whole
+administration's forges, seed banks, war material mothballed against a
+future nobody expected to need it. It held for centuries. A drifting orbit
+and its own quakes have started cracking its seals, and what is inside is
+worth exactly as much as anything under Furnace Nine's ash.
+
+**What was it, what happened to it.** A world was chosen because it was
+cold and stayed cold, and everything on it was buried in that cold on
+purpose, in neat rows, to be found later. Later arrived as a war instead
+of a requisition order. The rows are still there, but the ice that was
+supposed to keep them safe is now what is cracking open to expose them --
+the same story as Furnace Nine's slag, told in the opposite material.
+
+**Where the wear collects.** Not ash -- rime, the frost that grows on
+anything left out, thickest where the wind has had centuries to work.
+Crevices fill with packed snow instead of soot; standing water does not
+stain, it refreezes, which is its own kind of stain over enough winters.
+The one warmth anywhere is where a reactor seal has failed: cracked ice
+lit from underneath, ember-orange against blue-white, which reads as more
+dangerous here than the same fire ever did against Furnace Nine's warm
+ground -- because here it means something is not supposed to be burning.
+
+**Alloy Nodes** here are exactly what they are on Furnace Nine -- exposed
+strata of compacted machinery -- except what a scarp exposes is mothballed
+war material still in its storage cradle, packed in rime instead of slag.
+**Geothermal Vents** are not geothermal at all: they are where one of the
+reserve's own cooling reactors has breached containment and is melting its
+way out through the ice from below. Tapping one works exactly the same.
+Standing near one is, if anything, a worse idea than on Furnace Nine.
+
+**Surfaces.** The same five parts Furnace Nine's ground plays, in this
+world's own material (see Art direction → Surfaces): `rime` is the ground,
+the frost that grows on anything left out and fills every crevice. `ice` is
+the coolant lakes frozen a long way down — plates of clear ice over deep
+blue, buckled into white pressure ridges, the one glossy ground in the game.
+`meltrock` is what a breached reactor has exposed underneath: dark wet slate
+in angular plates, standing in meltwater, with the reactor's own heat in the
+deepest cracks. `rockcrete` is the same Directorate pad as anywhere else,
+glazed with frost in its joints. `scree` is the same collapse as Furnace
+Nine's rubble with no shelling in it — nothing was fought over here yet, the
+ice simply gave way — rimed on every upward face and bare underneath.
+
+**Palette.** Furnace Nine's `void`, `iron`, `rust` and `warning` are
+unchanged -- unlit metal is unlit metal and rust does not care what planet
+it is on. `ash` becomes `rime`: a pale, cold blue-grey (`#7a8a94`) instead
+of soot-black, standing in for the drift, the crevice-fill and the frost
+everything is glazed in. `rockcrete` becomes `meltrock`: the exposed
+ground under the ice, a darker slate-blue (`#2a343c`) rather than baked
+earth. `dust` becomes `frost-bloom`, a lighter near-white blue-grey
+(`#a8b8bc`) for raised surfaces rimed thickest. `ember` and `flame` stay
+exactly as warm as they are on Furnace Nine -- the one deliberate colour
+clash in the world, because a breached reactor should look like it does
+not belong. This is the one blue permitted outside a rim light, and it is
+permitted because it has just been argued for, the same as every other
+colour in this document has to be.
 
 ---
 
@@ -157,11 +280,32 @@ the Ashen Directorate its workforce was handed over with it, and a contracted
 labourer costs less than a soldier. They were given a weapon and a number, in
 that order.
 
-A Conscript wears what they wore at the foundry, reinforced: **a welder's visor
-for a helmet, a ceramic heat apron** that stops shrapnel as well as sparks, and
-an **ash filter** over the mouth. The weapon is a site tool — a **rivet driver**,
-re-bored to fire white-hot bolts. The contract number is stencilled on the back,
-where the officer reads it.
+A Conscript wears what they worked in, armoured. **A foundry hand does not
+carry hull plate in their arms** — they wear a **loader frame** to do it, the
+same class of powered exoskeleton a Servitor is wired into permanently, and
+every one of them has spent their life in one. So when the Directorate armed
+the workforce it did not issue armour. It bolted plate onto the frame they
+already had, and issued the number.
+
+That is what a Conscript is: **an old machine with new plate on it.**
+
+- **The frame is older than the war.** Machined rams, servo housings and
+  actuator rods at every joint — bright steel, the one thing on this world
+  made to a tolerance, and rusting at every seal it has outlived.
+- **The armour is salvage**, cut from hulls, mismatched panel to panel,
+  scorched along the torch cuts, bolted over a frame it was never made for.
+  Nothing is fitted. Everything laps and overhangs.
+- **The helmet is still a welder's hood**, sealed now, with one horizontal
+  lens burning ember where the eyes are.
+- **The pack is a foundry pack**, vented hot over the shoulders.
+- The weapon is still a site tool — a **rivet driver** re-bored to fire
+  white-hot bolts, and heavy enough now that the frame is what holds it
+  level. The contract number is stencilled on the backplate, where the
+  officer reads it.
+
+The silhouette is the point: **shoulders far wider than the hips, a small
+sealed head sunk between them, and a heavy plant at the feet.** It should read
+as something that weighs a great deal and was not built for this.
 
 They fight in **squads of three**, and a squad thins as it takes losses. On the
 field: bone-coloured helmets and aprons, the visor and shoulder plates in the
@@ -520,12 +664,31 @@ and where has the ash settled.** Ash collects in every horizontal crevice and
 nowhere vertical — that single rule does more for the look than any amount of
 detail.
 
+**A world has several surfaces, and a map paints with them.** One ground
+texture across a whole map is a floor, not a place: the player learns it in
+thirty seconds and then it is wallpaper. Every biome has a ground that covers
+most of it and four more that say what happened somewhere — and a map paints
+each of its tiles with one of them, so the ground changes as you cross it and
+the change means something. See `scripts/generate-terrain.mjs` for how they
+are made and `scripts/generate-map.mjs` for the rules that place them.
+
+Furnace Nine:
+
 | Surface | What it is |
 |---|---|
-| `ashfield` | The ground. Not a floor — the original surface is four hundred metres down. Compacted ash and slag fines, drifted and trodden, cracked by the heat still coming up through it, with clinker fragments pressed into the top. |
-| `slag` | The spoil heaps. Vitrified furnace waste, cooled into clinker and glassy black froth. Shot through with rust bleed where iron content weathered out, and still warm in the deep cracks. Sharp-edged and unnatural — these are dumped, not eroded. |
+| `ash` | The ground, and most of every map. Not a floor — the original surface is four hundred metres down. Compacted ash and slag fines, drifted and trodden, cracked by the heat still coming up through it, with clinker fragments and grit pressed into the top. |
+| `cinder` | Where the fires below come close enough to bake the ashfield into a crust. Dark clinker plates split along their seams, the seams packed with fines, rust bleeding from the edges and the odd deep crack still showing a red line. |
+| `ember` | The same crust where the seams have not cooled. Rock split open with lava in the gaps, and lakes where the crust has foundered into rafts. The only ground in the game that gives light. Painted around the vents, because that is where it would be. |
+| `rockcrete` | Poured slabs, the way the Directorate lays a pad: expansion joints, rivets where the formwork was tied, a hazard band on one edge, a corner bitten off, all of it filthy. The one laid surface, painted under a base. |
+| `rubble` | Where something stood and does not any more. Broken masonry and cut plate in heaps, shell craters between them, the ash blown off to show what was under it. Painted at the foot of the spoil heaps. |
+| `slag` | The spoil heaps themselves — not painted, because they stand on the ground rather than being part of it. Vitrified furnace waste, cooled into clinker and glassy black froth, shot through with rust bleed and still warm in the deep cracks. Sharp-edged and unnatural: these are dumped, not eroded. |
 
-**No straight lines in the ground surface.** The first version of `ashfield` was
+Cistern Four answers the same five questions in its own material — `rime` for
+the ground, `ice` for the frozen coolant lakes, `meltrock` for what a breached
+reactor has exposed, `rockcrete` for the same pads under a glaze of frost, and
+`scree` for the same collapse without the shelling. See Other fronts.
+
+**No straight lines in the ground surface.** The first version of `ash` was
 poured rockcrete slabs with expansion joints, which is a perfectly good
 industrial floor and was completely wrong for the job. A texture that tiles a
 hundred times across a map cannot contain a regular grid: at any zoom the joints

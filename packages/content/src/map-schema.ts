@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_PAINT_LAYERS, PAINT_PATTERN } from "./paint.js";
 
 /**
  * The map schema.
@@ -10,18 +11,24 @@ import { z } from "zod";
  *
  * WHY RECTANGLES AND NOT A TILE ARRAY
  * -----------------------------------
- * Terrain is a list of blocked rectangles rather than one entry per tile. A
+ * Blocked terrain is a list of rectangles rather than one entry per tile. A
  * 1024-tile map is a million tiles; as JSON that is tens of megabytes of mostly
  * zeroes, and it would be unreadable and unmergeable in a diff. Rectangles are
  * compact, human-editable, and map one-to-one onto `CostGrid.fillRect`, which
  * is the call the loader already makes.
  *
- * The format is versioned so the map editor -- which comes later -- can add a
- * freeform tile layer without invalidating maps written today.
+ * The one per-tile layer, `paint`, is the exception that proves it: it *is*
+ * freeform, because it is what the map editor paints, and it is stored run-
+ * length encoded so that it stays a few kilobytes and a readable diff. See
+ * paint.ts.
+ *
+ * The format is versioned so a change of shape is a clear error on an old
+ * file rather than a map that loads wrong. Format 2 added `layers` and
+ * `paint`.
  */
 
 /** Bumped when a change would make an older file load incorrectly. */
-export const MAP_FORMAT = 1;
+export const MAP_FORMAT = 2;
 
 /**
  * The largest map the simulation can represent.
@@ -96,6 +103,27 @@ export const mapSchema = z
       .regex(/^[a-z][a-z0-9-]*$/, "map id must be lowercase, dash-separated"),
     name: z.string().min(1),
     blurb: z.string().min(1),
+    /**
+     * Which terrain textures this map loads -- see scripts/generate-terrain.mjs
+     * and UNIVERSE.md's "Other fronts". Not folded into gameplay: two maps in
+     * the same biome look the same and play however their own layout says to.
+     */
+    biome: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]*$/, "biome must be lowercase, dash-separated"),
+    /**
+     * Which of the biome's surfaces this map paints with, in the order
+     * `paint` names them: `a` is the first. The first is also the ground
+     * everywhere the map has not painted anything else. The names are the
+     * generator's -- packages/client/assets/terrain/terrain.json lists what
+     * each biome has.
+     */
+    layers: z
+      .array(z.string().regex(/^[a-z][a-z0-9-]*$/, "surface names are lowercase, dash-separated"))
+      .min(1)
+      .max(MAX_PAINT_LAYERS),
+    /** One layer per tile, row-major from the top-left, run-length encoded. See paint.ts. */
+    paint: z.string().regex(PAINT_PATTERN, "paint is runs of an optional count and a layer letter, like '312a4c'"),
     size: z.number().int().min(MIN_MAP_TILES).max(MAX_MAP_TILES),
     /**
      * Start positions in slot order. Their count *is* the map's player limit:

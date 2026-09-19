@@ -17,7 +17,7 @@ import type { Model, ModelLibrary } from "./model-library.js";
 import { teamAttributes } from "./model-parts.js";
 import { aimFrame, aimYaw, turnToward } from "./aim.js";
 import { frameAt, type AnimationBake, type BakedClip } from "./skinned-parts.js";
-import { NEUTRAL_COLOUR, VENT_COLOUR, teamColour } from "./palette.js";
+import { ALLOY_COLOUR, VENT_COLOUR, teamColour } from "./palette.js";
 
 /**
  * Instanced rendering of simulation entities, with tick interpolation.
@@ -285,7 +285,7 @@ export class WorldRenderer {
           this.scratch.position.set(x, 0, z);
           this.scratch.rotation.set(0, 0, 0);
           this.scratch.scale.set(scale, scale, scale);
-          this.colour.setHex(type.resourceAmount > 0 ? NEUTRAL_COLOUR : VENT_COLOUR);
+          this.colour.setHex(type.resourceAmount > 0 ? ALLOY_COLOUR : VENT_COLOUR);
         } else if (type.kind === KIND_BUILDING) {
           const span = type.footprint;
           const building = e.buildRemaining[i] > 0;

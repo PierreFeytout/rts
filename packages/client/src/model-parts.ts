@@ -446,8 +446,22 @@ export function teamAttributes(capacity: number): {
 // The contract
 // ---------------------------------------------------------------------------
 
-/** Triangles per model before a warning. Four hundred units are on screen at once. */
-export const TRIANGLE_BUDGET: Record<ModelKind, number> = { unit: 3000, structure: 8000 };
+/**
+ * Triangles per model before a warning.
+ *
+ * Generous, because on this renderer triangles are the cheap axis and it is
+ * worth spending them. Every copy of a model is one instanced draw call per
+ * material whatever its detail, and the skinning is read from a baked texture
+ * rather than solved per figure -- so a squad of three at six thousand
+ * triangles costs the same number of calls as one at six hundred, and the
+ * whole of Cinder Reach's unit cap fits inside a few million triangles.
+ *
+ * What is actually scarce is `PART_BUDGET` below: materials multiply draw
+ * calls, and those are what fall over at four hundred units. So this exists
+ * to catch a model that has gone somewhere absurd -- a bevelled sphere per
+ * rivet -- and not to stop a unit being detailed.
+ */
+export const TRIANGLE_BUDGET: Record<ModelKind, number> = { unit: 6000, structure: 14000 };
 
 /** Materials per model before a warning. Each one is a draw call per model on screen. */
 export const PART_BUDGET = 4;

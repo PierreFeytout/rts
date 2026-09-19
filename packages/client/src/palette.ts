@@ -50,10 +50,19 @@ export const PALETTE = {
  */
 export const TEAM_COLOURS = [0x4ec9ff, 0xff5d47, 0xb77dff, 0x7de88a] as const;
 
-/** Neutral scenery: ore seams and the ground they are in. */
+/** Neutral scenery in general: the ground itself, and anything with no owner. */
 export const NEUTRAL_COLOUR = 0x9a7c4a;
 /** Vents, which are a hole with fire at the bottom. */
 export const VENT_COLOUR = 0xd2702a;
+/**
+ * Alloy Nodes: a shine picked out of the ground, not of it.
+ *
+ * The one other green in the game besides `verdigris` above -- chosen well
+ * away from both that dusty faction tone and the bright pastel green in
+ * TEAM_COLOURS, so a node reads as "the resource" and never as "the
+ * Verdigris" or "player four's army" at a glance.
+ */
+export const ALLOY_COLOUR = 0x2ecc71;
 
 export function teamColour(owner: number): number {
   return owner < 0 ? NEUTRAL_COLOUR : TEAM_COLOURS[owner % TEAM_COLOURS.length];

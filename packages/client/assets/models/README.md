@@ -160,12 +160,20 @@ Structures below.
 
 | | Triangles | Materials |
 |---|---|---|
-| Unit | 3,000 | 4 |
-| Structure | 8,000 | 4 |
+| Unit | 6,000 | 4 |
+| Structure | 14,000 | 4 |
 
-Four hundred units can be on screen at once. Each **material** is a separate draw
-call for every distinct model on screen, which costs far more than triangles do:
-three materials is fine, a material per panel is not.
+Four hundred units can be on screen at once, and **triangles are the cheap
+axis**: every copy of a model is one instanced draw call per material however
+detailed it is, and a skinned figure's bones are read from a baked texture
+rather than solved per copy. A squad of three heavy troopers costs the same
+number of draw calls as one light one. Spend the triangles.
+
+Each **material**, on the other hand, is a separate draw call for every
+distinct model on screen, and that is what falls over at four hundred units:
+three materials is fine, a material per panel is not. The triangle numbers
+above are there to catch a model that has gone somewhere absurd, not to stop
+one being detailed.
 
 ## Team colour
 
