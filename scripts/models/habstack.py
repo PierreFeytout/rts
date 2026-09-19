@@ -140,7 +140,9 @@ for x in (-0.5, 0.5):
         tilt = rot("X", rng.uniform(-0.6, 0.6)) @ rot("Y", rng.uniform(-0.6, 0.6))
         box((0.96, 0.96, 0.08), (x, y, 0.04 + rng.uniform(-0.008, 0.01)), s["rockcrete"], "pad", tilt,
             bevel=None if (x, y) == (-0.5, 0.5) else 0.014)
-box((0.1, 0.5, 0.012), (0.93, -0.55, 0.086), s["hazard"], "pad")
+# Hazard marking the length of the two pad edges the camera sees.
+box((0.16, 1.9, 0.012), (0.91, 0.0, 0.086), s["hazard"], "pad")
+box((1.9, 0.16, 0.012), (0.0, -0.91, 0.086), s["hazard"], "pad")
 
 for y in (STACK.y - W / 2 + 0.08, STACK.y + W / 2 - 0.08):
     piece(kit.beam((STACK.x - L / 2 - 0.04, y, SKID - 0.03), (STACK.x + L / 2 + 0.04, y, SKID - 0.03), 0.06,
@@ -199,6 +201,8 @@ for a in (0, 90):
           s["iron"], "fan")
 piece(kit.rod(fan_base + Vector((0, 0, 0.12)), fan_base + Vector((0, 0, 0.16)), 0.035, segments=8), s["iron"], "fan")
 pod_box(3, (0.34, 0.26, 0.03), (0.22, 0.08, H / 2 + 0.015), s["ceramic"], bevel=0.006)
+# A light strip along the top pod's eave on the side the camera sees.
+pod_box(3, (L - 0.16, 0.012, 0.03), (0.0, -W / 2 - 0.008, H / 2 - 0.02), lamp)
 
 # A canvas sheet rigged over the second pod's hatch against the ash.
 for k, x in ((1, 0.3),):

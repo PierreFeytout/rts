@@ -126,6 +126,9 @@ for x in (-0.5, 0.5):
         box((0.96, 0.96, PAD), (x, y, PAD / 2 + rng.uniform(-0.006, 0.008)), s["rockcrete"], "pad", tilt,
             bevel=0.012)
 piece(kit.rod((0, 0, PAD - 0.01), (0, 0, PAD + 0.015), 0.5, segments=16), s["iron"], "pad")
+# Hazard marking the length of the two pad edges the camera sees.
+box((0.16, 1.9, 0.012), (0.91, 0.0, PAD + 0.006), s["hazard"], "pad")
+box((1.9, 0.16, 0.012), (0.0, -0.91, PAD + 0.006), s["hazard"], "pad")
 
 # ---------------------------------------------------------------------------
 # The ring: salvaged plate, leaning out, each piece off a different wreck.

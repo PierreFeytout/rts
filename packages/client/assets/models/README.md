@@ -298,6 +298,11 @@ starting one. What it established, and what each new structure follows:
   whole base.
 - **Texture size follows footprint**, to keep the texel density the same:
   2048 for a footprint of 3 or 4, 1024 for 2.
+- **Every building carries the Directorate's motifs** (UNIVERSE.md, Surfaces):
+  the plate grid and its bolts come from the textures, on every face of
+  every part, for nothing. Hazard edging the length of the two apron edges
+  the camera sees, and a strip of `lamp` let into a lintel or an eave, are
+  modelled -- a few boxes each -- and every shipped building has both.
 - The game camera looks from **+X and -Y** (Blender axes). Doors, intakes,
   lights, paint and the finest detail go on those two faces; the far faces
   carry pipes and plates for the silhouette, cheaply.

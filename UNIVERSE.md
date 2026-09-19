@@ -633,6 +633,7 @@ nothing is pure black — ash scatters the furnace light into every shadow.
 | `void` | `#0a0806` | Sky, background, the bottom of everything |
 | `ash` | `#14100d` | Deepest surface tone, soot packed into crevices |
 | `iron` | `#221b15` | Unlit metal, structure shadow |
+| `steel` | `#5f646a` | Directorate plate: hulls, decking, pads. The one cold tone in the world, and only on what the Directorate dropped onto it |
 | `rockcrete` | `#3a2a1c` | The buried ground, showing through thin ash. The most common colour in the game |
 | `dust` | `#5a483a` | Raised surfaces catching ambient, ash drifts |
 | `rust` | `#7a4a22` | Corrosion, oxidised iron, the second most common colour |
@@ -642,10 +643,16 @@ nothing is pure black — ash scatters the furnace light into every shadow.
 | `verdigris` | `#4a7a5e` | The Verdigris faction, and nothing else |
 | `warning` | `#c4443a` | Damage, alarms, hazard. Never decorative |
 
-**Rules.** No blues except as a weak cold rim to separate silhouettes from the
-ground. No greens except Verdigris. No pure white anywhere — `bone` is the
-ceiling. Saturation lives in the light, not in the surfaces: an object is drab
-and the fire on it is not.
+**Rules, for Furnace Nine.** No blues except as a weak cold rim to separate
+silhouettes from the ground, and the Directorate's `steel` — which is cold
+only against the ash it stands on. Lit, it is a neutral grey, and the warmth
+on it is the light, the rust and the hazard paint, never the metal: that
+contrast is what lets a base read from the air, where a building in the
+ground's own browns vanished into it. No greens except Verdigris. No pure
+white anywhere — `bone` is the ceiling. Saturation lives in the light, not
+in the surfaces: an object is drab and the fire on it is not. Another world may earn
+its own exception to any of this — see Other fronts — but it has to be argued
+for with the same three questions Surfaces asks below, not assumed.
 
 ### Light
 
@@ -693,14 +700,37 @@ poured rockcrete slabs with expansion joints, which is a perfectly good
 industrial floor and was completely wrong for the job. A texture that tiles a
 hundred times across a map cannot contain a regular grid: at any zoom the joints
 line up into a lattice stretching to the horizon, and no amount of macro
-variation hides it. Organic noise has no such failure mode. The same rule will
-apply to any future ground surface.
+variation hides it. Organic noise has no such failure mode. The same rule
+applies to any surface that covers ground in quantity — which is why
+`rockcrete`, the one gridded surface, is only ever painted a few tiles at a
+time, where the grid is an asset rather than a liability.
 
-Rockcrete returns as a **building apron** — a few tiles under a Bastion,
-where it covers a small area, reads as deliberately laid, and the grid is an
-asset rather than a liability. Along with it: `plate` (cut and rewelded hull
-armour), `grate` (walkway decking over nothing), and `ceramic` (heat shielding,
-the only place `bone` appears in quantity).
+**Two surfaces that meet must interlock, not cross-fade.** A soft band of
+neither material is the clearest possible sign of an engine drawing terrain.
+Ash fills the cracks between crust plates and leaves their tops proud; snow
+lies in the joints of a pad and not on its slabs. Every surface is generated
+as a height field and the blend follows it — see `splat-material.ts`.
+
+**On the structures rather than the ground** (`structure_surfaces` in
+`scripts/models/surfaces.py`), the same three questions, answered in steel:
+
+| Surface | What it is |
+|---|---|
+| `plate` | Hull armour cut off something larger and welded back up in a grid of sheets, bolted at the corners. Gunmetal. Neighbouring sheets came off different wrecks and do not match in tone; the joints are packed with soot, rust runs down from every joint and every bolt, the cut edges are worn bright. Hulls, decks, doors, the sides of everything. |
+| `rockcrete` | The pad, cast in panels with the formwork ties still in the corners, cold grey under the ash, cracked and stained. Laid under every building, and bordered in hazard paint along the two edges the camera sees. |
+| `grate` | Walkway decking: a mesh of bars over nothing, worn bright along their tops and black between them. Ramps, landings, vents. |
+| `hazard` | Chevrons in furnace orange on soot black, scuffed to ghosts. The Directorate paints its warnings in the one colour this world already glows: pad edges, door frames, rails, anything a Servitor could walk off. |
+| `ceramic` | Heat shielding, the only place `bone` appears in quantity: re-entry tiles, furnace surrounds, stack collars. |
+| `paint` | Team colour over plate, the joints and bolts showing through it: cabs, lintels, roofs, struts — the large faces that say whose base it is. |
+
+What a Directorate building is, from the air: a cold grey block of bolted
+plate on an orange-edged pad, with lines of ember light let into its edges
+and lit windows in its faces. The plate grid and the bolts are in the
+textures, on every face of every part at no cost; the light strips and the
+hazard edging are modelled, on the two faces the camera sees, and every
+shipped building has both. Figures are not steel: their armour is thinner
+stock, warmer and unpanelled, and it has to separate from the ground under
+it rather than from the sky behind it.
 
 ---
 

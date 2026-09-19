@@ -182,6 +182,9 @@ for z in (0.34, 0.5, 0.64):
 piece(kit.rod((c.x, c.y, TOP), (c.x, c.y, CROWN), R + 0.02, segments=16, radius_end=0.3), s["paint"], "cap",
       painted=True, bevel=0.01)
 piece(kit.rod((c.x, c.y, CROWN), (c.x, c.y, CROWN + 0.05), 0.31, segments=16), s["iron"], "cap", bevel=0.008)
+# A hazard band round the flange, and a ring of light round the crown.
+piece(kit.rod((c.x, c.y, BASE + 0.045), (c.x, c.y, BASE + 0.08), R + 0.125, segments=16), s["hazard"], "cap")
+piece(kit.rod((c.x, c.y, CROWN + 0.015), (c.x, c.y, CROWN + 0.04), 0.316, segments=16), lamp, "cap")
 for a in (60, 180, 300):
     p = around(a, 0.2, CROWN + 0.05)
     box((0.08, 0.04, 0.09), (p.x, p.y, CROWN + 0.09), s["iron"], "cap", rot("Z", a + 90), bevel=0.008)

@@ -58,6 +58,7 @@ class Graph:
         self.bsdf = self.nt.nodes.new("ShaderNodeBsdfPrincipled")
         self.nt.links.new(self.bsdf.outputs["BSDF"], self.out.inputs["Surface"])
         self._coords = None
+        self._facing = None
 
     def node(self, kind, inputs=None, **props):
         n = self.nt.nodes.new(kind)
@@ -130,6 +131,79 @@ class Graph:
         z = self.node("ShaderNodeSeparateXYZ", {"Vector": normal}).outputs["Z"]
         return self.band(z, start, end)
 
+    # -- plates ---------------------------------------------------------------
+    #
+    # A Directorate structure is plate: sheets cut off something larger and
+    # welded back up in a grid, bolted at the corners (UNIVERSE.md, Surfaces).
+    # The joints and the bolts are drawn here rather than modelled, so that
+    # every plate of every building carries them at no triangle cost, in
+    # object space so they are sized in tiles like the wear. Each face draws
+    # only the two axes that run across it, chosen by its normal, so a wall,
+    # a deck and a sloped hull are all gridded and none of them is streaked.
+
+    def facing(self):
+        """|nx|, |ny|, |nz| of the surface normal: how squarely a face looks down each axis."""
+        if self._facing is None:
+            normal = self.node("ShaderNodeNewGeometry").outputs["Normal"]
+            sep = self.node("ShaderNodeSeparateXYZ", {"Vector": normal})
+            self._facing = tuple(self.math("ABSOLUTE", sep.outputs[i]) for i in range(3))
+        return self._facing
+
+    def cells(self, scale, offset):
+        """Object coordinates in plate units: `scale` plates per tile, at figure scale.
+
+        Offset so that no joint runs through the origin planes, where most
+        parts of a model are centred and a joint would split every one of
+        them down the middle.
+        """
+        sep = self.node("ShaderNodeSeparateXYZ", {"Vector": self.coords()})
+        return tuple(
+            self.math("ADD", self.math("MULTIPLY", sep.outputs[i], scale / self.scale, clamp=False), offset,
+                      clamp=False)
+            for i in range(3)
+        )
+
+    def seams(self, scale, width, offset=0.37):
+        """1 along the joints between plates, `width` tiles wide at figure scale."""
+        lines = []
+        for axis, square in zip(self.cells(scale, offset), self.facing()):
+            f = self.math("FRACT", axis, clamp=False)
+            d = self.math("MINIMUM", f, self.math("SUBTRACT", 1.0, f, clamp=False), clamp=False)
+            line = self.band(d, width * scale, width * scale * 0.4)
+            lines.append(self.math("MULTIPLY", line, self.math("SUBTRACT", 1.0, square)))
+        return self.math("MAXIMUM", self.math("MAXIMUM", lines[0], lines[1]), lines[2])
+
+    def studs(self, scale, radius, inset=0.09, offset=0.37):
+        """1 in a round bolt head just inside each corner of every plate of `seams(scale)`."""
+        near = []
+        for axis in self.cells(scale, offset):
+            f = self.math("FRACT", axis, clamp=False)
+            a = self.math("ABSOLUTE", self.math("SUBTRACT", f, inset, clamp=False), clamp=False)
+            b = self.math("ABSOLUTE", self.math("SUBTRACT", f, 1.0 - inset, clamp=False), clamp=False)
+            near.append(self.math("MINIMUM", a, b, clamp=False))
+        r = radius * scale
+        heads = []
+        for (u, v), square in zip(((1, 2), (0, 2), (0, 1)), self.facing()):
+            d = self.math("SQRT", self.math("ADD", self.math("MULTIPLY", near[u], near[u], clamp=False),
+                                             self.math("MULTIPLY", near[v], near[v], clamp=False), clamp=False),
+                          clamp=False)
+            heads.append(self.math("MULTIPLY", self.band(d, r, r * 0.5), square))
+        return self.math("MAXIMUM", self.math("MAXIMUM", heads[0], heads[1]), heads[2])
+
+    def plates(self, scale, offset=0.37):
+        """A random value per plate of `seams(scale)`, constant across the plate:
+        sheets off different wrecks do not match in tone."""
+        cell = [self.math("FLOOR", a, clamp=False) for a in self.cells(scale, offset)]
+        facing = self.facing()
+        tones = []
+        for (u, v), square in zip(((1, 2), (0, 2), (0, 1)), facing):
+            vec = self.node("ShaderNodeCombineXYZ", {"X": cell[u], "Y": cell[v], "Z": float(u + v)}).outputs["Vector"]
+            value = self.node("ShaderNodeTexWhiteNoise", {"Vector": vec}, noise_dimensions="3D").outputs["Value"]
+            tones.append(self.math("MULTIPLY", value, square))
+        total = self.math("ADD", self.math("ADD", facing[0], facing[1], clamp=False), facing[2], clamp=False)
+        mixed = self.math("ADD", self.math("ADD", tones[0], tones[1], clamp=False), tones[2], clamp=False)
+        return self.math("DIVIDE", mixed, total)
+
     def settle(self, colour, roughness, height):
         """Ash, where ash would lie.
 
@@ -144,7 +218,9 @@ class Graph:
         cover = self.math("MULTIPLY", self.facing_up(),
                           self.math("ADD", self.math("MULTIPLY", drifts, 0.75), crevices))
         cover = self.math("MULTIPLY", cover, self.ash)
-        ash = self.mix(self.noise(350, detail=2), (0.1, 0.075, 0.055), (0.16, 0.135, 0.11))
+        # Grey with the furnace's warmth in it, not brown: on a structure's cold
+        # steel a brown drift read as the metal itself having rusted through.
+        ash = self.mix(self.noise(350, detail=2), (0.085, 0.075, 0.065), (0.14, 0.128, 0.115))
         colour = self.mix(cover, colour, ash)
         roughness = self.mixf(cover, roughness, 0.95)
         lifted = self.math("MULTIPLY", cover, 0.4)
@@ -250,10 +326,16 @@ def ceramic(name="ceramic", colour=(0.62, 0.55, 0.42), **world):
     return g.finish(c, g.mixf(soot, 0.62, 0.9), height, strength=0.5, distance=0.0015)
 
 
-def iron(name="iron", colour=(0.3, 0.25, 0.2), **world):
-    """Worked iron: rust blooming in patches and running down, polished edges."""
+def iron(name="iron", colour=(0.3, 0.25, 0.2), bright=(0.42, 0.38, 0.33), rusted=(0.5, 0.72), **world):
+    """Worked iron: rust blooming in patches and running down, polished edges.
+
+    `bright` is the bare metal the polished edges show: warm for the figures'
+    iron, neutral for a structure's steel. `rusted` is where in the noise the
+    rust starts and is total; a structure's is set a little later, so a pod or
+    a stack reads as steel with rust on it rather than the other way round.
+    """
     g = Graph(name, **world)
-    rust = g.band(g.noise(70, detail=6, distortion=0.3), 0.5, 0.72)
+    rust = g.band(g.noise(70, detail=6, distortion=0.3), *rusted)
     runs = g.band(g.noise(40, vector=g.stretched(8, 8, 1)), 0.55, 0.8)
     polish = g.math("MULTIPLY", g.edges(0.004), 0.9)
     pitting = g.noise(500, detail=3)
@@ -261,17 +343,20 @@ def iron(name="iron", colour=(0.3, 0.25, 0.2), **world):
 
     c = g.mix(g.math("MULTIPLY", pitting, 0.3), colour, [v * 0.7 for v in colour])
     c = g.mix(g.math("MAXIMUM", rust, g.math("MULTIPLY", runs, 0.6)), c, (0.22, 0.085, 0.03))
-    c = g.mix(polish, c, (0.42, 0.38, 0.33))
+    c = g.mix(polish, c, bright)
     c = g.mix(g.math("MULTIPLY", grime, 0.5), c, (0.03, 0.025, 0.02))
     roughness = g.mixf(polish, g.mixf(rust, 0.55, 0.9), 0.3)
     return g.finish(c, roughness, g.math("ADD", pitting, rust), strength=0.3, distance=0.0008, metallic=0.3)
 
 
-def paint(name="paint", **world):
+def paint(name="paint", panels=0, **world):
     """Team paint over iron: 45% grey, chipped through at edges, scratched, dusty.
 
     The chips are iron-coloured and so much darker, which the game turns into
     darker paint -- close enough to bare metal at the size anything is seen.
+
+    With `panels`, the paint is over plate (see `plate`): the joints and bolts
+    show through it, as dark and as slightly darker paint.
     """
     g = Graph(name, **world)
     chips = g.math("MULTIPLY", g.edges(0.005), g.band(g.noise(140, detail=4), 0.4, 0.55))
@@ -280,10 +365,50 @@ def paint(name="paint", **world):
     grime = g.math("SUBTRACT", 1.0, g.occlusion(0.005))
 
     c = g.mix(g.math("MULTIPLY", dust, 0.4), (0.45, 0.45, 0.45), (0.36, 0.34, 0.31))
+    relief = g.math("MAXIMUM", chips, scratches)
+    if panels:
+        joints = g.seams(panels, 0.0045)
+        bolts = g.studs(panels, 0.0055, inset=0.08)
+        c = g.mix(bolts, c, (0.38, 0.38, 0.38))
+        c = g.mix(joints, c, (0.04, 0.04, 0.04))
+        relief = g.math("MAXIMUM", relief, g.math("SUBTRACT", joints, g.math("MULTIPLY", bolts, 0.8)))
     c = g.mix(g.math("MAXIMUM", chips, g.math("MULTIPLY", scratches, 0.8)), c, (0.1, 0.085, 0.07))
     c = g.mix(g.math("MULTIPLY", grime, 0.5), c, (0.06, 0.055, 0.05))
-    height = g.math("SUBTRACT", 1.0, g.math("MAXIMUM", chips, scratches))
+    height = g.math("SUBTRACT", 1.0, relief)
     return g.finish(c, g.mixf(chips, 0.6, 0.45), height, strength=0.4, distance=0.001)
+
+
+def servo(name="servo", colour=(0.4, 0.39, 0.375), **world):
+    """Machined steel: hydraulic rams, servo housings, actuator rods.
+
+    The one surface on a Directorate figure that was made to a tolerance. Every
+    other material here is worked, salvaged or worn -- iron rusts, canvas
+    frays, ceramic chips -- and that is the whole reason this one exists: a
+    powered frame reads as powered only if the mechanism in it is visibly
+    finer than the armour bolted over it. So it is bright, nearly smooth, and
+    sharply specular, with turning marks along its length and oil gathered
+    where it enters a joint.
+
+    Not clean, though. It is decades old and the ends of every ram, where the
+    seal has given up, are rusting like everything else on this world.
+    """
+    g = Graph(name, **world)
+    turning = g.band(g.noise(700, detail=2, vector=g.stretched(1, 1, 26)), 0.35, 0.65)
+    scoring = g.band(g.noise(120, detail=2, vector=g.stretched(1, 1, 14)), 0.66, 0.78)
+    polish = g.math("MULTIPLY", g.edges(0.003), 0.85)
+    rust = g.math("MULTIPLY", g.band(g.noise(110, detail=5, distortion=0.3), 0.66, 0.86), 0.7)
+    oil = g.math("SUBTRACT", 1.0, g.occlusion(0.006))
+
+    c = g.mix(g.math("MULTIPLY", turning, 0.4), colour, [v * 0.76 for v in colour])
+    c = g.mix(scoring, c, [v * 1.2 for v in colour])
+    c = g.mix(rust, c, (0.21, 0.09, 0.035))
+    c = g.mix(polish, c, (0.62, 0.6, 0.58))
+    # Oil does not lighten steel, it darkens it and kills the reflection.
+    c = g.mix(g.math("MULTIPLY", oil, 0.75), c, (0.035, 0.032, 0.03))
+    roughness = g.mixf(polish, g.mixf(rust, 0.26, 0.8), 0.14)
+    roughness = g.mixf(oil, roughness, 0.6)
+    height = g.math("ADD", g.math("MULTIPLY", turning, 0.4), scoring)
+    return g.finish(c, roughness, height, strength=0.15, distance=0.0005, metallic=0.85)
 
 
 def rubber(name="rubber", **world):
@@ -306,88 +431,155 @@ def directorate_surfaces(**world):
     }
 
 
+def armour_surfaces(**world):
+    """A figure in a powered frame: the figure surfaces, plus the two a rig
+    needs -- salvaged hull for the armour bolted over it, machined steel for
+    the mechanism underneath. See the Conscript in UNIVERSE.md."""
+    return {
+        **directorate_surfaces(**world),
+        # Warmer than a building's steel, and without its plate grid: this is
+        # thinner stock, off smaller wrecks, cut to the figure rather than
+        # welded up in sheets, and it has to separate from the ground a figure
+        # stands on rather than from the sky a hull is seen against.
+        "plate": plate(colour=(0.235, 0.215, 0.185), bright=(0.4, 0.36, 0.31), panels=0, **world),
+        "servo": servo(**world),
+    }
+
+
 # ---------------------------------------------------------------------------
 # The Directorate's structures. UNIVERSE.md names these as the surfaces that
 # arrive with the buildings: rockcrete for the apron, plate for the hull, grate
-# for the decking. Hazard marking is the Directorate's, worn down to ghosts.
+# for the decking, hazard marking round every edge a Servitor could walk off.
+#
+# They are the one cold thing on Furnace Nine. The ground is warm ash under a
+# warm key, and a building in the same browns vanished into it from the game
+# camera; a base has to read from the air as something dropped onto the
+# world, not grown out of it. So structure steel is gunmetal, blue-grey, and
+# the warmth on it is the light, the rust and the hazard paint -- never the
+# metal itself. See UNIVERSE.md, Palette, `steel`.
 # ---------------------------------------------------------------------------
 
-def plate(name="plate", colour=(0.25, 0.2, 0.155), **world):
-    """Hull armour cut off something larger and welded back up.
+# Gunmetal: UNIVERSE.md's `steel`, in linear light.
+STEEL = (0.115, 0.127, 0.145)
+# The same, in the dark: fittings, pipes, frames, the underside of everything.
+STEEL_DARK = (0.075, 0.082, 0.094)
+# Bare metal where an edge is worn or a bolt is turned: what polished steel
+# shows, cold, well short of white.
+STEEL_BRIGHT = (0.36, 0.37, 0.38)
+# Soot packed into a joint. Nothing on a structure is darker.
+JOINT = (0.012, 0.012, 0.014)
+
+
+def plate(name="plate", colour=STEEL, bright=STEEL_BRIGHT, panels=6, **world):
+    """Hull armour cut off something larger and welded back up in a grid.
 
     Nothing about it is new: neighbouring plates came off different wrecks and
-    do not match in tone, rust bleeds down from every seam, the cut edges are
-    torch-scorched, and wherever something rubs the metal shows through.
+    do not match in tone, the joints between them are packed with soot, rust
+    bleeds down from every joint and every bolt, the cut edges are worn
+    bright, the corners torch-scorched. `panels` is how many plates to a tile
+    at figure scale; 0 is a single sheet, which is what a figure's armour is.
     """
     g = Graph(name, **world)
-    tone = g.band(g.noise(6, detail=2), 0.3, 0.7)
-    rust = g.band(g.noise(50, detail=6, distortion=0.4), 0.52, 0.75)
-    runs = g.band(g.noise(30, vector=g.stretched(10, 10, 1)), 0.5, 0.78)
-    scorch = g.math("MULTIPLY", g.edges(0.012), g.band(g.noise(25), 0.35, 0.65))
-    polish = g.math("MULTIPLY", g.edges(0.003), 0.7)
+    if panels:
+        # Plates a tile across on a building, with joints and bolts sized to
+        # still read at the middle zoom: a grid nobody can see from the game
+        # camera is texture nobody paid for.
+        tone = g.plates(panels)
+        joints = g.seams(panels, 0.0045)
+        bolts = g.studs(panels, 0.0055, inset=0.08)
+    else:
+        tone = g.band(g.noise(6, detail=2), 0.3, 0.7)
+        joints = bolts = None
+    rust = g.band(g.noise(50, detail=6, distortion=0.4), 0.6, 0.82)
+    runs = g.math("MULTIPLY", g.band(g.noise(30, vector=g.stretched(10, 10, 1)), 0.5, 0.78),
+                  g.band(g.noise(8, detail=3), 0.4, 0.7))
+    scorch = g.math("MULTIPLY", g.edges(0.012), g.band(g.noise(25), 0.4, 0.7))
+    polish = g.math("MULTIPLY", g.edges(0.003), 0.8)
     pitting = g.noise(400, detail=3)
     grime = g.math("SUBTRACT", 1.0, g.occlusion(0.008))
 
-    c = g.mix(tone, [v * 1.18 for v in colour], [v * 0.72 for v in colour])
-    c = g.mix(g.math("MULTIPLY", pitting, 0.25), c, [v * 0.6 for v in colour])
-    c = g.mix(g.math("MAXIMUM", rust, g.math("MULTIPLY", runs, 0.7)), c, (0.2, 0.08, 0.03))
-    c = g.mix(g.math("MULTIPLY", scorch, 0.8), c, (0.045, 0.032, 0.024))
-    c = g.mix(polish, c, (0.4, 0.36, 0.31))
-    c = g.mix(g.math("MULTIPLY", grime, 0.6), c, (0.025, 0.02, 0.015))
-    roughness = g.mixf(polish, g.mixf(rust, 0.6, 0.9), 0.35)
-    height = g.math("ADD", g.math("MULTIPLY", pitting, 0.5), rust)
-    return g.finish(c, roughness, height, strength=0.3, distance=0.001)
+    c = g.mix(tone, [v * 0.68 for v in colour], [v * 1.3 for v in colour])
+    c = g.mix(g.math("MULTIPLY", pitting, 0.2), c, [v * 0.6 for v in colour])
+    c = g.mix(g.math("MAXIMUM", g.math("MULTIPLY", rust, 0.75), g.math("MULTIPLY", runs, 0.65)), c,
+              (0.2, 0.08, 0.03))
+    c = g.mix(g.math("MULTIPLY", scorch, 0.7), c, (0.03, 0.028, 0.026))
+    height = g.math("MULTIPLY", pitting, 0.3)
+    if panels:
+        c = g.mix(bolts, c, [v * 1.15 for v in colour])
+        c = g.mix(joints, c, JOINT)
+        height = g.math("SUBTRACT", g.math("ADD", height, g.math("MULTIPLY", bolts, 0.7)), joints)
+    c = g.mix(polish, c, bright)
+    c = g.mix(g.math("MULTIPLY", grime, 0.6), c, (0.02, 0.02, 0.022))
+    roughness = g.mixf(polish, g.mixf(rust, 0.55, 0.9), 0.3)
+    if panels:
+        roughness = g.mixf(joints, roughness, 0.95)
+    return g.finish(c, roughness, height, strength=0.5, distance=0.0012)
 
 
-def rockcrete(name="rockcrete", colour=(0.16, 0.12, 0.085), **world):
-    """Poured slab: aggregate in the face, hairline cracks, oil and soot stains,
+def rockcrete(name="rockcrete", colour=(0.105, 0.108, 0.115), **world):
+    """Poured slab, the way the Directorate lays a pad: cast in a grid of
+    panels with the formwork ties still in the corners, cold grey under the
+    ash, aggregate in the face, hairline cracks, oil and soot stains, the
     corners knocked off. Laid in a grid, which here is the point."""
     g = Graph(name, **world)
+    tone = g.plates(8)
+    joints = g.seams(8, 0.004)
+    ties = g.studs(8, 0.0035, inset=0.08)
     aggregate = g.noise(300, detail=2)
-    mottle = g.band(g.noise(14, detail=4), 0.3, 0.7)
     cracks = g.cracks(14, 0.018)
     stains = g.band(g.noise(10, detail=6, distortion=0.5), 0.58, 0.8)
     knocks = g.math("MULTIPLY", g.edges(0.01), g.band(g.noise(60, detail=3), 0.4, 0.6))
     grime = g.math("SUBTRACT", 1.0, g.occlusion(0.01))
 
-    c = g.mix(mottle, [v * 1.12 for v in colour], [v * 0.8 for v in colour])
+    c = g.mix(tone, [v * 0.8 for v in colour], [v * 1.16 for v in colour])
     c = g.mix(g.band(aggregate, 0.55, 0.7), c, [v * 1.5 for v in colour])
-    c = g.mix(g.math("MULTIPLY", stains, 0.85), c, (0.03, 0.025, 0.02))
-    c = g.mix(g.math("MULTIPLY", cracks, 0.9), c, (0.02, 0.016, 0.012))
+    c = g.mix(g.math("MULTIPLY", stains, 0.85), c, (0.024, 0.023, 0.023))
+    c = g.mix(g.math("MULTIPLY", cracks, 0.9), c, (0.015, 0.015, 0.016))
+    c = g.mix(ties, c, (0.16, 0.09, 0.05))
+    c = g.mix(joints, c, JOINT)
     c = g.mix(knocks, c, [v * 1.4 for v in colour])
-    c = g.mix(g.math("MULTIPLY", grime, 0.6), c, (0.02, 0.016, 0.012))
-    height = g.math("SUBTRACT", g.math("MULTIPLY", aggregate, 0.4), g.math("MAXIMUM", cracks, knocks))
+    c = g.mix(g.math("MULTIPLY", grime, 0.6), c, (0.015, 0.015, 0.016))
+    height = g.math("SUBTRACT", g.math("ADD", g.math("MULTIPLY", aggregate, 0.4), g.math("MULTIPLY", ties, 0.5)),
+                    g.math("MAXIMUM", g.math("MAXIMUM", cracks, knocks), joints))
     return g.finish(c, g.mixf(stains, 0.9, 0.6), height, strength=0.4, distance=0.002)
 
 
-def grate(name="grate", colour=(0.14, 0.11, 0.085), **world):
-    """Walkway decking: dark iron worn bright along the top of every bar."""
+def grate(name="grate", colour=STEEL_DARK, **world):
+    """Walkway decking: a mesh of steel bars over nothing, the bars worn bright
+    along their tops and black between them."""
     g = Graph(name, **world)
+    bars = g.seams(60, 0.0032, offset=0.5)
     rust = g.band(g.noise(45, detail=5), 0.5, 0.75)
     worn = g.math("MULTIPLY", g.edges(0.004), g.facing_up(0.3, 0.8))
     grime = g.math("SUBTRACT", 1.0, g.occlusion(0.008))
 
     c = g.mix(rust, colour, (0.17, 0.07, 0.03))
-    c = g.mix(worn, c, (0.36, 0.32, 0.27))
-    c = g.mix(g.math("MULTIPLY", grime, 0.7), c, (0.015, 0.012, 0.01))
-    return g.finish(c, g.mixf(worn, g.mixf(rust, 0.65, 0.9), 0.35), rust, strength=0.25, distance=0.001)
+    c = g.mix(worn, c, STEEL_BRIGHT)
+    c = g.mix(g.math("SUBTRACT", 1.0, bars), c, (0.008, 0.008, 0.009))
+    c = g.mix(g.math("MULTIPLY", grime, 0.7), c, (0.012, 0.012, 0.013))
+    roughness = g.mixf(worn, g.mixf(rust, 0.6, 0.9), 0.35)
+    return g.finish(c, roughness, bars, strength=0.6, distance=0.001)
 
 
 def hazard(name="hazard", **world):
-    """Hazard stripes, bone on soot, scuffed down to ghosts where boots and
-    loads have passed over them for years."""
-    g = Graph(name, **world)
-    stripes = g.stripes(12)
-    wear = g.band(g.noise(30, detail=6, distortion=0.3), 0.42, 0.68)
+    """Hazard chevrons, furnace orange on soot black -- the Directorate paints
+    its warnings in the one colour this world already glows -- scuffed down
+    to ghosts where boots and loads have passed over them for years."""
+    # Less ash than the rest of the building: a hazard mark under a full
+    # drift was a brown line from the game camera, and the whole point of it
+    # is to be the one thing on a pad that is seen from there.
+    g = Graph(name, **{**world, "ash": world.get("ash", 0.0) * 0.35})
+    stripes = g.stripes(14)
+    wear = g.band(g.noise(30, detail=6, distortion=0.3), 0.5, 0.78)
     chips = g.math("MULTIPLY", g.edges(0.006), g.band(g.noise(120, detail=4), 0.4, 0.55))
     grime = g.math("SUBTRACT", 1.0, g.occlusion(0.008))
 
-    painted = g.math("MULTIPLY", stripes, g.math("SUBTRACT", 1.0, g.math("MULTIPLY", wear, 0.8)))
-    c = g.mix(painted, (0.05, 0.042, 0.035), (0.46, 0.39, 0.28))
-    c = g.mix(g.math("MAXIMUM", chips, g.math("MULTIPLY", wear, 0.35)), c, (0.2, 0.15, 0.11))
-    c = g.mix(g.math("MULTIPLY", grime, 0.6), c, (0.02, 0.016, 0.012))
+    painted = g.math("MULTIPLY", stripes, g.math("SUBTRACT", 1.0, g.math("MULTIPLY", wear, 0.55)))
+    c = g.mix(painted, (0.03, 0.03, 0.03), (0.7, 0.3, 0.04))
+    c = g.mix(g.math("MAXIMUM", chips, g.math("MULTIPLY", wear, 0.3)), c, (0.18, 0.12, 0.08))
+    c = g.mix(g.math("MULTIPLY", grime, 0.6), c, (0.015, 0.014, 0.013))
     height = g.math("SUBTRACT", 1.0, chips)
-    return g.finish(c, g.mixf(wear, 0.6, 0.85), height, strength=0.3, distance=0.001)
+    return g.finish(c, g.mixf(wear, 0.55, 0.85), height, strength=0.3, distance=0.001)
 
 
 def slag(name="slag", colour=(0.035, 0.03, 0.027), **world):
@@ -409,11 +601,44 @@ def slag(name="slag", colour=(0.035, 0.03, 0.027), **world):
     return g.finish(c, g.mixf(glass, 0.85, 0.25), height, strength=0.6, distance=0.002)
 
 
-def structure_surfaces(scale, ash=1.0):
-    """Everything a Directorate building is made of, sized for `scale`."""
+def vehicle_surfaces(scale):
+    """A Directorate vehicle: a figure's surfaces for its frame, its rider and
+    its rubber, and the structures' cold steel for everything that was cut off
+    a hull -- a vehicle is a small building that moves, and it has to separate
+    from the ground the same way. No settled ash: it moves, and sheds it.
+    Plates finer than a building's, because the whole thing is a tile or two."""
+    world = {"scale": scale, "ash": 0.0}
+    return {
+        "canvas": canvas(**world),
+        "leather": leather(**world),
+        "ceramic": ceramic(**world),
+        "rubber": rubber(**world),
+        "servo": servo(**world),
+        "iron": iron(colour=STEEL_DARK, bright=STEEL_BRIGHT, rusted=(0.56, 0.78), **world),
+        "paint": paint(panels=10, **world),
+        "plate": plate(panels=10, **world),
+        "grate": grate(**world),
+        "hazard": hazard(**world),
+    }
+
+
+def structure_surfaces(scale, ash=0.6):
+    """Everything a Directorate building is made of, sized for `scale`.
+
+    The figure surfaces a building shares -- canvas, leather, ceramic, rubber
+    -- as they are; iron and paint in the structures' cold steel; and the
+    four that only a building has. Ash lies on it, but thinner than on the
+    ground's scenery: a deck under a full drift was brown from the air, and
+    the deck is most of what the camera sees of a building.
+    """
     world = {"scale": scale, "ash": ash}
     return {
-        **directorate_surfaces(**world),
+        "canvas": canvas(**world),
+        "leather": leather(**world),
+        "ceramic": ceramic(**world),
+        "iron": iron(colour=STEEL_DARK, bright=STEEL_BRIGHT, rusted=(0.56, 0.78), **world),
+        "paint": paint(panels=6, **world),
+        "rubber": rubber(**world),
         "plate": plate(**world),
         "rockcrete": rockcrete(**world),
         "grate": grate(**world),

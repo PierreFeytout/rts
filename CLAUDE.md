@@ -95,6 +95,10 @@ packages/client/assets/models/README.md before starting one.
   are dropped and unfold; Verdigris structures grow through what was there.
 - Built in tiles at the real footprint, `structure_surfaces(scale=6.0)`,
   detail and paint on the faces the camera sees (+X and -Y in Blender).
+- **Cold steel on a warm world.** Structures are gunmetal plate, jointed and
+  bolted by the texture, on a pad edged in orange hazard paint, with light
+  strips let into their edges (UNIVERSE.md, Surfaces). Never brown: a
+  building in the ground's colours vanishes from the game camera.
 - "Verified in the game" includes the animations: construction at several
   stages, production, and a unit coming out, captured with `window.__rts` as
   the README describes.

@@ -197,10 +197,13 @@ for name, (sx, sy) in QUADRANTS.items():
             piece(kit.box((0.96, 0.96, 0.08), (sx * ix, sy * iy, 0.04 + lift), tilt), s["rockcrete"],
                   f"apron.{name}", bevel=None if under else 0.014)
 
-# Hazard marking where Servitors come and go.
-for y in (0.84, -0.84):
-    piece(kit.box((0.14, 0.52, 0.012), (1.9, y, 0.086)), s["hazard"], "apron.FR" if y < 0 else "apron.FL")
-piece(kit.box((0.66, 0.12, 0.012), (-0.3, -1.93, 0.086)), s["hazard"], "apron.BR")
+# Hazard marking the length of the two apron edges the camera sees -- where
+# Servitors come and go, and where salvage is dropped. A pad bordered in
+# furnace orange says "Directorate" from the air before anything on it does.
+for y, bone in ((-0.98, "apron.FR"), (0.98, "apron.FL")):
+    piece(kit.box((0.16, 1.9, 0.012), (1.91, y, 0.086)), s["hazard"], bone)
+for x, bone in ((-0.98, "apron.BR"), (0.98, "apron.FR")):
+    piece(kit.box((1.9, 0.16, 0.012), (x, -1.91, 0.086)), s["hazard"], bone)
 
 # The intake trough, on the ground where the conveyor starts.
 TROUGH = Vector((-1.1, -1.66))
@@ -222,7 +225,13 @@ for i in range(5):
 piece(kit.prism(kit.octagon(1.52, 0.42), 0.16, 0.3, top_scale=0.97), s["iron"], "hull", bevel=0.03)
 piece(kit.prism(kit.octagon(HULL_HALF0, HULL_CHAMFER), HULL_Z0, HULL_Z1, top_scale=HULL_HALF1 / HULL_HALF0),
       s["plate"], "hull", bevel=0.035)
-piece(kit.prism(kit.octagon(1.25, 0.34), HULL_Z1 - 0.02, DECK, top_scale=0.99), s["iron"], "hull", bevel=0.018)
+# The deck is plate too: seen from the game camera it is the largest face the
+# building has, and the plate grid is what makes it read as decking.
+piece(kit.prism(kit.octagon(1.25, 0.34), HULL_Z1 - 0.02, DECK, top_scale=0.99), s["plate"], "hull", bevel=0.018)
+# Light strips let into the hull's top edge on the two faces the camera sees:
+# the lines of light a Directorate structure shows from the air.
+for face, u0, u1, out in (("+X", -0.75, 0.75, 0.0), ("-Y", -1.0, 1.0, 0.05)):
+    wall_plate(face, u0, u1, HULL_Z1 - 0.075, HULL_Z1 - 0.04, lamp, out=out, thick=0.012, bevel=None)
 
 # Retro-thruster bells under the skirt, and their flames -- hidden in the hull
 # until the drop.
@@ -251,6 +260,8 @@ for i in range(8):
 for u0 in (-0.76, 0.6):
     wall_plate("+X", u0, u0 + 0.16, 0.27, DOOR_TOP + 0.08, s["hazard"], out=0.0, thick=0.11, bevel=0.015)
 wall_plate("+X", -0.84, 0.84, DOOR_TOP + 0.01, LINTEL + 0.02, s["paint"], painted=True, thick=0.13, bevel=0.02)
+# A light strip along the lintel, the width of the door.
+wall_plate("+X", -0.64, 0.64, DOOR_TOP + 0.05, DOOR_TOP + 0.085, lamp, out=0.13, thick=0.012, bevel=None)
 wall_plate("+X", -0.62, 0.62, 0.25, DOOR_BOTTOM, s["iron"], thick=0.13, bevel=0.012)
 rivets("+X", [-0.72, -0.48, -0.24, 0.0, 0.24, 0.48, 0.72], LINTEL - 0.05, out=0.13)
 
@@ -294,6 +305,10 @@ wall_plate("-Y", 0.6, 1.0, 0.64, 1.4, s["paint"], painted=True)
 # A patch welded over something that went through the paint.
 wall_plate("-Y", 0.62, 0.84, 0.66, 0.86, s["plate"], out=0.05, thick=0.03, spin=11, bevel=0.01)
 wall_plate("-Y", 0.62, 1.0, 0.48, 0.62, s["ceramic"], thick=0.04, bevel=0.01)
+# An intake louvre beside the hopper: slats over a dark throat.
+wall_plate("-Y", -0.92, -0.6, 1.0, 1.32, s["rubber"], out=0.05, thick=0.01, bevel=None)
+for z in (1.03, 1.1, 1.17, 1.24):
+    wall_plate("-Y", -0.93, -0.59, z, z + 0.035, s["iron"], out=0.055, thick=0.03, bevel=0.006)
 rivets("-Y", [0.66, 0.81, 0.96], 1.35)
 rivets("-Y", [-0.95, -0.7, -0.45], 1.35)
 weld("-Y", -0.19, 0.45, 1.4)
@@ -371,6 +386,10 @@ for (a, b) in (((RAIL, -0.85), (RAIL, 0.85)), ((-0.85, -RAIL), (0.85, -RAIL)), (
 for x, y in ((RAIL, -0.85), (RAIL, -0.28), (RAIL, 0.28), (RAIL, 0.85), (-0.85, -RAIL), (-0.28, -RAIL),
              (0.28, -RAIL), (0.85, -RAIL)):
     piece(kit.beam((x, y, DECK), (x, y, DECK + 0.29), 0.04), s["iron"], "hull")
+# Hazard marking along the deck's two edges the camera sees, under the rail:
+# the deck is the largest face the game camera gets of the building.
+for a, b in (((1.17, -0.8), (1.17, 0.8)), ((-0.8, -1.17), (0.8, -1.17))):
+    piece(kit.beam((a[0], a[1], DECK + 0.006), (b[0], b[1], DECK + 0.006), 0.012, width=0.12), s["hazard"], "hull")
 
 # A furnace vent, glowing through its bars, and the hammers either side of it.
 VENT = Vector((0.55, -0.45))

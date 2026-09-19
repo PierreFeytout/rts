@@ -154,8 +154,10 @@ for name, x in COLUMNS.items():
         box((0.96, 0.96, 0.08), (x, y, 0.04 + lift), s["rockcrete"], f"apron.{name}", tilt,
             bevel=None if hidden else 0.014)
 
-for y in (-0.72, 0.47):
-    box((0.12, 0.3, 0.012), (1.43, y, 0.086), s["hazard"], "apron.E")
+# Hazard marking the length of the two apron edges the camera sees.
+box((0.16, 2.9, 0.012), (1.41, 0.0, 0.086), s["hazard"], "apron.E")
+for name, x in COLUMNS.items():
+    box((0.96, 0.16, 0.012), (x, -1.41, 0.086), s["hazard"], f"apron.{name}")
 
 for (x, y, bone, turn) in ((1.38, 0.8, "apron.E", 90), (0.32, -1.3, "apron.C", 0)):
     for k in range(5):
@@ -307,6 +309,8 @@ for x in (-0.25, 0.15, 0.55, 0.92):
     box((0.2, 0.03, 0.12), (x, HY0 - 0.035, 0.86), s["iron"], "wall.S")
     box((0.15, 0.02, 0.07), (x, HY0 - 0.05, 0.86), lamp, "wall.S")
 box((length - 0.04, 0.02, 0.08), ((HX0 + HX1) / 2, HY0 - 0.04, DECK + 0.07), s["hazard"], "wall.S")
+# A light strip under the eave, the length of the hall.
+box((length - 0.2, 0.012, 0.035), ((HX0 + HX1) / 2, HY0 - 0.04, EAVE - 0.05), lamp, "wall.S")
 box((0.34, 0.025, 0.28), (0.72, HY0 - 0.045, 0.55), s["plate"], "wall.S", rot("Y", 5), bevel=0.008)
 # The contract number goes on a ceramic plate.
 box((0.22, 0.02, 0.14), (-0.25, HY0 - 0.04, 0.58), s["ceramic"], "wall.S", bevel=0.006)
@@ -333,6 +337,8 @@ for y in (DOOR[0] - 0.06, DOOR[1] + 0.06):
 box((0.11, DOOR[1] - DOOR[0] + 0.26, EAVE - DOOR_TOP + 0.02), (HX1 + 0.02, HMID, (DOOR_TOP + EAVE) / 2 + 0.01),
     s["paint"], "wall.E", painted=True, bevel=0.015)
 box((0.01, DOOR[1] - DOOR[0], DOOR_TOP - DECK), (HX1 - 0.02, HMID, (DECK + DOOR_TOP) / 2), s["rubber"], "wall.E")
+# A light strip along the lintel, the width of the door.
+box((0.012, DOOR[1] - DOOR[0] + 0.1, 0.035), (HX1 + 0.08, HMID, DOOR_TOP + 0.06), lamp, "wall.E")
 
 for name, hinge, sign in (("door.R", DOOR[0], 1), ("door.L", DOOR[1], -1)):
     width = (DOOR[1] - DOOR[0]) / 2
@@ -467,6 +473,14 @@ kit.track_clip(rig, "release", 45, {
     "door.L": {0: [], 10: [("Z", 100)], 32: [("Z", 100)], 45: []},
     "beacon": {0: [], 15: [("Z", 90)], 30: [("Z", 180)], 45: [("Z", 270)]},
 }, linear=("beacon",))
+
+# Where it smokes, for the game (the model README, "Smoke"): the mouth of
+# each stack, in the unit box, Blender axes. The Foundry never goes cold.
+rig["rts_smoke"] = [
+    v
+    for (x, y, top, r) in STACKS.values()
+    for v in (x / FOOTPRINT, y / FOOTPRINT, (top + 0.09) / FOOTPRINT)
+]
 
 stats = kit.report(col)
 print("foundry:", stats)
